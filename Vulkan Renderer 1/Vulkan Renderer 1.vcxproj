@@ -12,10 +12,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="Vulkan.cpp" />
+    <ClCompile Include="vulkan_display.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Vulkan.h" />
+    <ClInclude Include="vulkan_display.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>

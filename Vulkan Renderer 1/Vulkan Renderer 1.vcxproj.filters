@@ -18,12 +18,12 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Vulkan.cpp">
+    <ClCompile Include="vulkan_display.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Vulkan.h">
+    <ClInclude Include="vulkan_display.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
