@@ -1,3 +1,5 @@
+//#define NO_EXCEPTIONS
+
 #include"vulkan_display.h" // Vulkan.h must be before GLFW
 
 #include <GLFW/glfw3.h>
@@ -5,6 +7,8 @@
 #include <iostream>
 
 namespace {
+	using c_str = const char*;
+
 	struct GLFW {
 		bool good;
 		GLFW() { good = glfwInit(); }
@@ -49,7 +53,7 @@ int main() {
 
 
 	vulkan_display vulkan;
-	if (!vulkan.create_instance(required_extensions)) return -1;
+	vulkan.create_instance(required_extensions);
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	GLFWwindow* window_ptr = glfwCreateWindow(800, 800, "GLFW/Vulkan Window", NULL, NULL);
@@ -66,7 +70,7 @@ int main() {
 		printf("Window cannot be created.\n");
 	}
 	
-	assert(vulkan.init_vulkan(raw_surface, 800, 800));
+	vulkan.init_vulkan(raw_surface, 800, 800);
 
 	while (!glfwWindowShouldClose(window_ptr)) {
 		glfwPollEvents();

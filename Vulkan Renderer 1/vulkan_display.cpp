@@ -6,7 +6,10 @@
 #include <memory>
 #include <vector>
 #include <iostream>
+#include <fstream>
+#include <filesystem>
 
+std::string vulkan_display_error_message = "";
 
 VkResult vkCreateDebugUtilsMessengerEXT(VkInstance instance,
 	const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
@@ -20,6 +23,8 @@ VkResult vkCreateDebugUtilsMessengerEXT(VkInstance instance,
 }
 
 namespace {
+	using c_str = const char*;
+	using namespace std::literals;
 
 	VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 		VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -33,40 +38,43 @@ namespace {
 	}
 
 
-	bool check_validation_layers(const std::vector<c_str>& required_layers) {
-		std::vector<vk::LayerProperties>  layers = vk::enumerateInstanceLayerProperties();
+	RETURN_VAL check_validation_layers(const std::vector<c_str>& required_layers) {
+		std::vector<vk::LayerProperties>  layers;
+		CHECKED_ASSIGN(layers, vk::enumerateInstanceLayerProperties());
 		//for (auto& l : layers) puts(l.layerName);
 
-		auto is_layer_supported = [&](const c_str req_layer) {
+		for (auto& req_layer : required_layers) {
 			auto layer_equals = [req_layer](auto layer) { return strcmp(req_layer, layer.layerName) == 0; };
-
-			return std::any_of(layers.begin(), layers.end(), layer_equals);
-		};
-		return std::all_of(required_layers.begin(), required_layers.end(), is_layer_supported);
+			bool found = std::any_of(layers.begin(), layers.end(), layer_equals);
+			CHECK(found, "Layer "s + req_layer + " is not supported.");
+		}
+		return RETURN_VAL();
 	}
 
 
-	bool check_instance_extensions(const std::vector<c_str>& required_extensions) {
-		std::vector<vk::ExtensionProperties> extensions = vk::enumerateInstanceExtensionProperties(nullptr);
+	RETURN_VAL check_instance_extensions(const std::vector<c_str>& required_extensions) {
+		std::vector<vk::ExtensionProperties> extensions;
+		CHECKED_ASSIGN(extensions, vk::enumerateInstanceExtensionProperties(nullptr));
 
-		auto is_extension_supported = [&](auto req_exten) {
+		for (auto& req_exten : required_extensions) {
 			auto extension_equals = [req_exten](auto exten) { return strcmp(req_exten, exten.extensionName) == 0; };
-
-			return std::any_of(extensions.begin(), extensions.end(), extension_equals);
-		};
-		return std::all_of(required_extensions.begin(), required_extensions.end(), is_extension_supported);
+			bool found = std::any_of(extensions.begin(), extensions.end(), extension_equals);
+			CHECK(found, "Instance extension "s + req_exten + " is not supported.");
+		}
+		return RETURN_VAL();
 	}
 
 
-	bool check_device_extensions(const std::vector<c_str>& required_extensions, const vk::PhysicalDevice& device) {
-		std::vector<vk::ExtensionProperties> extensions = device.enumerateDeviceExtensionProperties(nullptr);
+	RETURN_VAL check_device_extensions(const std::vector<c_str>& required_extensions, const vk::PhysicalDevice& device) {
+		std::vector<vk::ExtensionProperties> extensions;
+		CHECKED_ASSIGN(extensions, device.enumerateDeviceExtensionProperties(nullptr));
 
-		auto is_extension_supported = [&](auto req_exten) {
+		for(auto & req_exten: required_extensions) {
 			auto extension_equals = [req_exten](auto exten) { return strcmp(req_exten, exten.extensionName) == 0; };
-
-			return std::any_of(extensions.begin(), extensions.end(), extension_equals);
-		};
-		return std::all_of(required_extensions.begin(), required_extensions.end(), is_extension_supported);
+			bool found = std::any_of(extensions.begin(), extensions.end(), extension_equals);
+			CHECK(found, "Device extension "s + req_exten + " is not supported.");
+		}
+		return RETURN_VAL();
 	}
 
 
@@ -91,7 +99,7 @@ namespace {
 
 //---------------------------------------PRIVATE------------------------------------------------
 
-bool vulkan_display::init_validation_layers_error_messenger() {
+RETURN_VAL vulkan_display::init_validation_layers_error_messenger() {
 	vk::DebugUtilsMessengerCreateInfoEXT messenger_info{};
 	using severity = vk::DebugUtilsMessageSeverityFlagBitsEXT;
 	using type = vk::DebugUtilsMessageTypeFlagBitsEXT;
@@ -100,43 +108,43 @@ bool vulkan_display::init_validation_layers_error_messenger() {
 		.setMessageType(type::eGeneral | type::ePerformance | type::eValidation)
 		.setPfnUserCallback(debugCallback)
 		.setPUserData(nullptr);
-	messenger = instance.createDebugUtilsMessengerEXT(messenger_info);
-	return true;
+	CHECKED_ASSIGN(messenger, instance.createDebugUtilsMessengerEXT(messenger_info));
+	return RETURN_VAL();
 }
 
 
-bool vulkan_display::create_physical_device() {
+RETURN_VAL vulkan_display::create_physical_device() {
 	assert(instance != vk::Instance{});
-	std::vector<vk::PhysicalDevice> gpus = instance.enumeratePhysicalDevices();
+	std::vector<vk::PhysicalDevice> gpus;
+	CHECKED_ASSIGN(gpus, instance.enumeratePhysicalDevices());
 
 	gpu = choose_GPU(gpus);
 	std::cout << "Vulkan uses GPU called: " << gpu.getProperties().deviceName.data() << std::endl;
-	return true;
+	return RETURN_VAL();
 }
 
 
- bool vulkan_display::get_queue_family_index() {
+RETURN_VAL vulkan_display::get_queue_family_index() {
 	assert(gpu != vk::PhysicalDevice{});
 
 	std::vector<vk::QueueFamilyProperties> families = gpu.getQueueFamilyProperties();
 
 	queue_family_index = UINT32_MAX;
 	for (uint32_t i = 0; i < families.size(); i++) {
-		if ((families[i].queueFlags & vk::QueueFlagBits::eGraphics)
-			&& gpu.getSurfaceSupportKHR(i, surface))
-		{
+		VkBool32 surface_supported;
+		CHECKED_ASSIGN(surface_supported, gpu.getSurfaceSupportKHR(i, surface));
+
+		if (surface_supported && (families[i].queueFlags & vk::QueueFlagBits::eGraphics)) {
 			queue_family_index = i;
 			break;
 		}
 	}
-	if (queue_family_index != UINT32_MAX) {
-		std::cout << "No suitable GPU queue found." << std::endl;
-	}
-	return true;
+	CHECK(queue_family_index != UINT32_MAX, "No suitable GPU queue found.");
+	return RETURN_VAL();
 }
 
 
- bool vulkan_display::create_logical_device() {
+RETURN_VAL vulkan_display::create_logical_device() {
 	assert(gpu != vk::PhysicalDevice{});
 	assert(queue_family_index != INT32_MAX);
 
@@ -157,13 +165,14 @@ bool vulkan_display::create_physical_device() {
 		.setEnabledExtensionCount(static_cast<uint32_t>(required_extensions.size()))
 		.setPpEnabledExtensionNames(required_extensions.data());
 
-	device = gpu.createDevice(device_info);
-	return true;
+	CHECKED_ASSIGN(device, gpu.createDevice(device_info));
+	return RETURN_VAL();
 }
 
 
- bool vulkan_display::get_present_mode() {
-	std::vector<vk::PresentModeKHR> modes = gpu.getSurfacePresentModesKHR(surface);
+RETURN_VAL vulkan_display::get_present_mode() {
+	std::vector<vk::PresentModeKHR> modes;
+	CHECKED_ASSIGN(modes, gpu.getSurfacePresentModesKHR(surface));
 
 	bool vsync = true;
 	vk::PresentModeKHR first_choice{}, second_choice{};
@@ -179,19 +188,19 @@ bool vulkan_display::create_physical_device() {
 	if (std::any_of(modes.begin(), modes.end(), [first_choice](auto mode) { return mode == first_choice; })) {
 		swapchain_atributes.mode = first_choice;
 		swapchain_atributes.mode = first_choice;
-		return true;
+		return RETURN_VAL();
 	}
 	if (std::any_of(modes.begin(), modes.end(), [second_choice](auto mode) { return mode == second_choice; })) {
 		swapchain_atributes.mode = second_choice;
-		return true;
+		return RETURN_VAL();
 	}
 	swapchain_atributes.mode = modes[0];
-	return true;
+	return RETURN_VAL();
 }
 
-
- bool vulkan_display::get_surface_format() {
-	std::vector<vk::SurfaceFormatKHR> formats = gpu.getSurfaceFormatsKHR(surface);
+RETURN_VAL vulkan_display::get_surface_format() {
+	std::vector<vk::SurfaceFormatKHR> formats;
+	CHECKED_ASSIGN(formats, gpu.getSurfaceFormatsKHR(surface));
 
 	vk::SurfaceFormatKHR default_format{};
 	default_format.format = vk::Format::eB8G8R8A8Srgb;
@@ -199,19 +208,19 @@ bool vulkan_display::create_physical_device() {
 
 	if (std::any_of(formats.begin(), formats.end(), [default_format](auto& format) {return format == default_format; })) {
 		swapchain_atributes.format = default_format;
-		return true;
+		return RETURN_VAL();
 	}
 	swapchain_atributes.format = formats[0];
-	return true;
+	return RETURN_VAL();
 }
 
 
- bool vulkan_display::create_swap_chain() {
+ RETURN_VAL vulkan_display::create_swap_chain() {
 	auto& capabilities = swapchain_atributes.capabilities;
-	capabilities = gpu.getSurfaceCapabilitiesKHR(surface);
+	CHECKED_ASSIGN(capabilities, gpu.getSurfaceCapabilitiesKHR(surface));
 
-	if (!get_present_mode()) return false;
-	if (!get_surface_format()) return false;
+	PASS_RESULT(get_present_mode());
+	PASS_RESULT(get_surface_format());
 
 	image_size.width = std::clamp(image_size.width,
 		capabilities.minImageExtent.width,
@@ -242,14 +251,14 @@ bool vulkan_display::create_physical_device() {
 		.setCompositeAlpha(vk::CompositeAlphaFlagBitsKHR::eOpaque)
 		.setClipped(true)
 		.setOldSwapchain(swapchain);
-	swapchain = device.createSwapchainKHR(swapchain_info);
+	CHECKED_ASSIGN(swapchain, device.createSwapchainKHR(swapchain_info));
 	create_swapchain_images();
-	return true;
+	return RETURN_VAL();
 }
 
 
- bool vulkan_display::create_swapchain_images() {
-	swapchain_images = device.getSwapchainImagesKHR(swapchain);
+RETURN_VAL vulkan_display::create_swapchain_images() {
+	CHECKED_ASSIGN(swapchain_images, device.getSwapchainImagesKHR(swapchain));
 
 	uint32_t image_count = static_cast<uint32_t>(swapchain_images.size());
 	vk::ImageViewCreateInfo image_view_info{};
@@ -271,30 +280,30 @@ bool vulkan_display::create_physical_device() {
 	swapchain_image_fences.resize(image_count);
 	for (uint32_t i = 0; i < image_count; i++) {
 		image_view_info.setImage(swapchain_images[i]);
-		swapchain_image_views[i] = device.createImageView(image_view_info);
+		CHECKED_ASSIGN(swapchain_image_views[i], device.createImageView(image_view_info));
 		vk::FenceCreateInfo fence_info{};
 		fence_info.setFlags(vk::FenceCreateFlagBits::eSignaled);
-		swapchain_image_fences[i] = device.createFence(fence_info);
+		CHECKED_ASSIGN(swapchain_image_fences[i], device.createFence(fence_info));
 	}
-	return true;
+	return RETURN_VAL();
 }
 
 
- bool vulkan_display::create_command_pool() {
+ RETURN_VAL vulkan_display::create_command_pool() {
 	vk::CommandPoolCreateInfo pool_info{};
 	pool_info.setQueueFamilyIndex(queue_family_index);
-	command_pool = device.createCommandPool(pool_info);
-	return true;
+	CHECKED_ASSIGN(command_pool, device.createCommandPool(pool_info));
+	return RETURN_VAL();
 }
 
 
- bool vulkan_display::create_command_buffers() {
+ RETURN_VAL vulkan_display::create_command_buffers() {
 	vk::CommandBufferAllocateInfo allocate_info{};
 	allocate_info
 		.setCommandPool(command_pool)
 		.setLevel(vk::CommandBufferLevel::ePrimary)
 		.setCommandBufferCount(static_cast<uint32_t>(swapchain_images.size()));
-	command_buffers = device.allocateCommandBuffers(allocate_info);
+	CHECKED_ASSIGN(command_buffers, device.allocateCommandBuffers(allocate_info));
 
 	vk::ClearColorValue clear_color{};
 	clear_color.setFloat32({ 1.f, 0.f, 0.f, 1.f });
@@ -326,27 +335,29 @@ bool vulkan_display::create_physical_device() {
 		using p_flags = vk::PipelineStageFlagBits;
 		first_barrier.setImage(swapchain_images[i]);
 		second_barrier.setImage(swapchain_images[i]);
-		command_buffers[i].begin(begin_info);
+		PASS_RESULT(command_buffers[i].begin(begin_info));
 		command_buffers[i].pipelineBarrier(p_flags::eTopOfPipe, p_flags::eTransfer, vk::DependencyFlagBits::eByRegion, {}, {}, { first_barrier });
 		command_buffers[i].clearColorImage(swapchain_images[i], vk::ImageLayout::eTransferDstOptimal, clear_color, image_range);
 		command_buffers[i].pipelineBarrier(p_flags::eTransfer, p_flags::eBottomOfPipe, vk::DependencyFlagBits::eByRegion, {}, {}, { second_barrier });
-		command_buffers[i].end();
+		PASS_RESULT(command_buffers[i].end());
 	}
-	return true;
+	return RETURN_VAL();
 }
+
+
 
  //---------------------------------------PUBLIC------------------------------------------------
 
- bool vulkan_display::create_instance(std::vector<c_str>& required_extensions) {
+ RETURN_VAL vulkan_display::create_instance(std::vector<c_str>& required_extensions) {
 #ifdef _DEBUG
 	std::vector validation_layers{ "VK_LAYER_KHRONOS_validation" };
-	assert(check_validation_layers(validation_layers));
+	PASS_RESULT(check_validation_layers(validation_layers));
 #else
 	std::vector<c_str> validation_layers;
 #endif
 	const char* debug_extension = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 	required_extensions.push_back(debug_extension);
-	if (!check_instance_extensions(required_extensions)) return false;
+	PASS_RESULT(check_instance_extensions(required_extensions));
 
 	vk::ApplicationInfo app_info{};
 	app_info.setApiVersion(VK_API_VERSION_1_0);
@@ -358,40 +369,41 @@ bool vulkan_display::create_physical_device() {
 		.setPpEnabledLayerNames(validation_layers.data())
 		.setEnabledExtensionCount(static_cast<uint32_t>(required_extensions.size()))
 		.setPpEnabledExtensionNames(required_extensions.data());
+	CHECKED_ASSIGN(instance, vk::createInstance(instance_info));
 
-	instance = vk::createInstance(instance_info);
 #ifdef _DEBUG
-	assert(init_validation_layers_error_messenger());
+	PASS_RESULT(init_validation_layers_error_messenger());
 #endif
-	return true;
+
+	return RETURN_VAL();
 }
 
 
- bool vulkan_display::init_vulkan(VkSurfaceKHR surface, uint32_t width, uint32_t height) {
+ RETURN_VAL vulkan_display::init_vulkan(VkSurfaceKHR surface, uint32_t width, uint32_t height) {
 	this->surface = surface;
 	this->image_size = vk::Extent2D{ width, height };
 	// Order of following calls is important
-	if (!create_physical_device()) return false;
-	if (!get_queue_family_index()) return false;
-	if (!create_logical_device()) return false;
+	PASS_RESULT(create_physical_device());
+	PASS_RESULT(get_queue_family_index());
+	PASS_RESULT(create_logical_device());
 	queue = device.getQueue(queue_family_index, 0);
-	if (!create_swap_chain()) return false;
-	if (!create_command_pool()) return false;
-	if (!create_command_buffers()) return false;
-	return true;
+	PASS_RESULT(create_swap_chain());
+	PASS_RESULT(create_command_pool());
+	PASS_RESULT(create_command_buffers());
+	return RETURN_VAL();
 }
 
 
- bool vulkan_display::render() {
+ RETURN_VAL vulkan_display::render() {
 	vk::SemaphoreCreateInfo semaphor_info{};
 
-	vk::Semaphore image_available_semaphore = device.createSemaphore(semaphor_info);
+	vk::Semaphore image_available_semaphore;
+	CHECKED_ASSIGN(image_available_semaphore, device.createSemaphore(semaphor_info));
 	auto [acquired, image_index] = device.acquireNextImageKHR(swapchain, UINT64_MAX, image_available_semaphore, nullptr);
-	if (acquired != vk::Result::eSuccess) {
-		return false;
-	}
+	CHECK(acquired, "Next swapchain image cannot be acquired.");
 
-	vk::Semaphore image_prepared_semaphore = device.createSemaphore(semaphor_info);
+	vk::Semaphore image_prepared_semaphore;
+	CHECKED_ASSIGN(image_prepared_semaphore, device.createSemaphore(semaphor_info));
 	std::vector<vk::PipelineStageFlags> wait_masks{ vk::PipelineStageFlagBits::eAllCommands };
 	vk::SubmitInfo submit_info{};
 	submit_info
@@ -404,17 +416,15 @@ bool vulkan_display::create_physical_device() {
 		"Waiting for fence...");
 	device.resetFences(swapchain_image_fences[image_index]);
 	
-	queue.submit(submit_info, swapchain_image_fences[image_index]);
+	PASS_RESULT(queue.submit(submit_info, swapchain_image_fences[image_index]));
 
 	vk::PresentInfoKHR present_info{};
 	present_info
 		.setImageIndices(image_index)
 		.setSwapchains(swapchain)
 		.setWaitSemaphores(image_prepared_semaphore);
-	auto res = queue.presentKHR(present_info);
-	if (res != vk::Result::eSuccess) {
-		return false;
-	}
-
-	return true;
+	CHECK(queue.presentKHR(present_info), "Error when presenting image.");
+	return RETURN_VAL();
 }
+
+
