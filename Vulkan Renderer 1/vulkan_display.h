@@ -87,12 +87,21 @@ class vulkan_display {
 	} swapchain_atributes{};
 	std::vector<vk::Image> swapchain_images;
 	std::vector<vk::ImageView> swapchain_image_views;
+	std::vector<vk::Framebuffer> swapchain_framebuffers;
 	std::vector<vk::Fence> swapchain_image_fences;
 
 	vk::Extent2D image_size{ 0, 0 };
 
 	vk::CommandPool command_pool;
 	std::vector<vk::CommandBuffer> command_buffers;
+
+
+
+	vk::ShaderModule vertex_shader;
+	vk::ShaderModule fragment_shader;
+	vk::RenderPass render_pass;
+	vk::Pipeline pipeline;
+	vk::PipelineLayout pipeline_layout;
 
 
 private:
@@ -120,12 +129,14 @@ private:
 
 	RETURN_VAL create_graphics_pipeline();
 
+	RETURN_VAL create_framebuffers();
+
 public:
 	vulkan_display() = default;
 
 	RETURN_VAL create_instance(std::vector<const char*>& required_extensions);
 
-	inline const VkInstance& get_instance() {
+	const vk::Instance& get_instance() {
 		return instance;
 	}
 

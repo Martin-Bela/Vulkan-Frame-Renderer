@@ -27,12 +27,4 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
-  <ItemGroup>
-    <Text Include="vulkan_vertex.vert">
-      <Filter>Resource Files</Filter>
-    </Text>
-    <Text Include="vulkan_fragment.frag">
-      <Filter>Resource Files</Filter>
-    </Text>
-  </ItemGroup>
 </Project>
