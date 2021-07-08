@@ -1,8 +1,9 @@
 //#define NO_EXCEPTIONS
 
-#include"vulkan_display.h" // Vulkan.h must be before GLFW
+#include "vulkan_display.h" // Vulkan.h must be before GLFW
 
 #include <GLFW/glfw3.h>
+#include <SOIL2/SOIL2.h>
 
 #include <iostream>
 
@@ -52,7 +53,7 @@ int main() {
 	if (!get_glfw_vulkan_required_extensions(required_extensions)) return false;
 
 
-	vulkan_display vulkan;
+	Vulkan_display vulkan;
 	vulkan.create_instance(required_extensions);
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -66,7 +67,7 @@ int main() {
 
 
 	VkSurfaceKHR raw_surface;
-	if (glfwCreateWindowSurface(vulkan.get_instance(), window_ptr, NULL, &raw_surface)) {
+	if (glfwCreateWindowSurface(vulkan.get_instance(), window_ptr, NULL, &raw_surface) != VK_SUCCESS) {
 		printf("Window cannot be created.\n");
 	}
 	

@@ -45,10 +45,10 @@ extern std::string vulkan_display_error_message;
 //EXCEPTIONS ARE ENABLED
 #include<exception>
 
-struct  vulkan_display_exception {
+struct  Vulkan_display_exception {
 	std::string message;
-	inline vulkan_display_exception() = default;
-	inline vulkan_display_exception(std::string msg) :
+	inline Vulkan_display_exception() = default;
+	inline Vulkan_display_exception(std::string msg) :
 		message{std::move(msg)} { }
 	inline const char* what() {
 		return message.c_str();
@@ -59,7 +59,7 @@ struct  vulkan_display_exception {
 
 #define PASS_RESULT(expr) { expr; }
 
-#define CHECK(expr, msg) { if (to_vk_result(expr) != vk::Result::eSuccess) throw vulkan_display_exception{msg}; }
+#define CHECK(expr, msg) { if (to_vk_result(expr) != vk::Result::eSuccess) throw Vulkan_display_exception{msg}; }
 
 #define CHECKED_ASSIGN(variable, expr) { variable = expr; }
 
@@ -67,7 +67,7 @@ struct  vulkan_display_exception {
 #endif //NO_EXCEPTIONS -------------------------------------------------------
 
 
-class vulkan_display {
+class Vulkan_display {
 	vk::Instance instance;
 
 	vk::DebugUtilsMessengerEXT messenger;
@@ -85,23 +85,38 @@ class vulkan_display {
 		vk::SurfaceFormatKHR format;
 		vk::PresentModeKHR mode = vk::PresentModeKHR::eFifo;
 	} swapchain_atributes{};
-	std::vector<vk::Image> swapchain_images;
-	std::vector<vk::ImageView> swapchain_image_views;
-	std::vector<vk::Framebuffer> swapchain_framebuffers;
-	std::vector<vk::Fence> swapchain_image_fences;
+
+	struct Swapchain_image {
+		vk::Image image;
+		vk::ImageView view;
+		vk::Framebuffer framebuffer;
+		vk::Fence* image_queue_fence;
+	};
+	std::vector<Swapchain_image> swapchain_images;
 
 	vk::Extent2D image_size{ 0, 0 };
+
+	vk::ShaderModule vertex_shader;
+	vk::ShaderModule fragment_shader;
+	
+	vk::RenderPass render_pass;
+	vk::ClearValue clear_color;
+	vk::RenderPassBeginInfo render_pass_begin_info;
+	
+	vk::Pipeline pipeline;
+	vk::PipelineLayout pipeline_layout;
 
 	vk::CommandPool command_pool;
 	std::vector<vk::CommandBuffer> command_buffers;
 
-
-
-	vk::ShaderModule vertex_shader;
-	vk::ShaderModule fragment_shader;
-	vk::RenderPass render_pass;
-	vk::Pipeline pipeline;
-	vk::PipelineLayout pipeline_layout;
+	unsigned concurent_paths_count = 3;
+	unsigned current_path_id = 0;
+	struct Path {
+		vk::Semaphore image_acquired_semaphore;
+		vk::Semaphore image_rendered_semaphore;
+		vk::Fence path_available_fence;
+	};
+	std::vector<Path> concurent_paths;
 
 
 private:
@@ -121,18 +136,26 @@ private:
 
 	RETURN_VAL create_swapchain_images();
 
-	RETURN_VAL create_command_pool();
-
-	RETURN_VAL create_command_buffers();
-
 	RETURN_VAL create_render_pass();
 
 	RETURN_VAL create_graphics_pipeline();
 
 	RETURN_VAL create_framebuffers();
 
+	RETURN_VAL create_paths();
+
+	RETURN_VAL create_command_pool();
+
+	RETURN_VAL create_command_buffers();
+
+	RETURN_VAL create_concurrent_paths();
+
+	RETURN_VAL record_commands(unsigned current_path_id, uint32_t image_index);
+
 public:
-	vulkan_display() = default;
+	Vulkan_display() = default;
+
+	~Vulkan_display();
 
 	RETURN_VAL create_instance(std::vector<const char*>& required_extensions);
 
@@ -151,3 +174,12 @@ public:
 /*#define CONCATENATE_IMPL(x, y) x##y
 #define CONCATENATE(x, y) CONCATENATE_IMPL(x, y)
 #define UNIQ(x) CONCATENATE(x, __LINE__)*/
+
+/*vk::ImageMemoryBarrier render_begin_barrier{};
+render_begin_barrier
+	.setOldLayout(vk::ImageLayout::eUndefined)
+	.setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
+	.setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+	.setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+	.setSubresourceRange(image_range);*/
+	//command_buffers[i].pipelineBarrier(p_flags::eTopOfPipe, p_flags::eFragmentShader, vk::DependencyFlagBits::eByRegion, {}, {}, { first_barrier });
