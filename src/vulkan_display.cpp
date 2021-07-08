@@ -11,6 +11,8 @@
 
 std::string vulkan_display_error_message = "";
 
+// vkCreateDebugUtilsMessengerEXT and DestroyDebugUtilsMessengerEXT are extension functions, 
+// so their implementation is not included in static vulkan library and has to be loaded dynamically
 VkResult vkCreateDebugUtilsMessengerEXT(VkInstance instance,
 	const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
 	const VkAllocationCallbacks* pAllocator,
@@ -19,8 +21,24 @@ VkResult vkCreateDebugUtilsMessengerEXT(VkInstance instance,
 	auto implementation = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>
 		(vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
 	assert(vkCreateDebugUtilsMessengerEXT != nullptr);
-	return implementation(instance, pCreateInfo, pAllocator, pMessenger);
+	if (implementation != nullptr) {
+		return implementation(instance, pCreateInfo, pAllocator, pMessenger);
+	}
+	return VK_ERROR_EXTENSION_NOT_PRESENT;
 }
+
+
+void vkDestroyDebugUtilsMessengerEXT(VkInstance instance,
+	VkDebugUtilsMessengerEXT debugMessenger, 
+	const VkAllocationCallbacks* pAllocator) 
+{
+	auto implementation = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>
+		(vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+	if (implementation != nullptr) {
+		implementation(instance, debugMessenger, pAllocator);
+	}
+}
+
 
 namespace {
 	using c_str = const char*;
@@ -124,9 +142,38 @@ namespace {
 	}
 } //namespace
 
-//---------------------------------------PRIVATE------------------------------------------------
+RETURN_VAL Vulkan_display::create_instance(std::vector<c_str>& required_extensions) {
+#ifdef _DEBUG
+	std::vector validation_layers{ "VK_LAYER_KHRONOS_validation" };
+	PASS_RESULT(check_validation_layers(validation_layers));
+#else
+	std::vector<c_str> validation_layers;
+#endif
+	const char* debug_extension = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+	required_extensions.push_back(debug_extension);
+	PASS_RESULT(check_instance_extensions(required_extensions));
 
-RETURN_VAL vulkan_display::init_validation_layers_error_messenger() {
+	vk::ApplicationInfo app_info{};
+	app_info.setApiVersion(VK_API_VERSION_1_0);
+
+	vk::InstanceCreateInfo instance_info{};
+	instance_info
+		.setPApplicationInfo(&app_info)
+		.setEnabledLayerCount(static_cast<uint32_t>(validation_layers.size()))
+		.setPpEnabledLayerNames(validation_layers.data())
+		.setEnabledExtensionCount(static_cast<uint32_t>(required_extensions.size()))
+		.setPpEnabledExtensionNames(required_extensions.data());
+	CHECKED_ASSIGN(instance, vk::createInstance(instance_info));
+
+#ifdef _DEBUG
+	PASS_RESULT(init_validation_layers_error_messenger());
+#endif
+
+	return RETURN_VAL();
+}
+
+
+RETURN_VAL Vulkan_display::init_validation_layers_error_messenger() {
 	vk::DebugUtilsMessengerCreateInfoEXT messenger_info{};
 	using severity = vk::DebugUtilsMessageSeverityFlagBitsEXT;
 	using type = vk::DebugUtilsMessageTypeFlagBitsEXT;
@@ -140,7 +187,7 @@ RETURN_VAL vulkan_display::init_validation_layers_error_messenger() {
 }
 
 
-RETURN_VAL vulkan_display::create_physical_device() {
+RETURN_VAL Vulkan_display::create_physical_device() {
 	assert(instance != vk::Instance{});
 	std::vector<vk::PhysicalDevice> gpus;
 	CHECKED_ASSIGN(gpus, instance.enumeratePhysicalDevices());
@@ -151,7 +198,7 @@ RETURN_VAL vulkan_display::create_physical_device() {
 }
 
 
-RETURN_VAL vulkan_display::get_queue_family_index() {
+RETURN_VAL Vulkan_display::get_queue_family_index() {
 	assert(gpu != vk::PhysicalDevice{});
 
 	std::vector<vk::QueueFamilyProperties> families = gpu.getQueueFamilyProperties();
@@ -171,7 +218,7 @@ RETURN_VAL vulkan_display::get_queue_family_index() {
 }
 
 
-RETURN_VAL vulkan_display::create_logical_device() {
+RETURN_VAL Vulkan_display::create_logical_device() {
 	assert(gpu != vk::PhysicalDevice{});
 	assert(queue_family_index != INT32_MAX);
 
@@ -197,7 +244,7 @@ RETURN_VAL vulkan_display::create_logical_device() {
 }
 
 
-RETURN_VAL vulkan_display::get_present_mode() {
+RETURN_VAL Vulkan_display::get_present_mode() {
 	std::vector<vk::PresentModeKHR> modes;
 	CHECKED_ASSIGN(modes, gpu.getSurfacePresentModesKHR(surface));
 
@@ -225,7 +272,7 @@ RETURN_VAL vulkan_display::get_present_mode() {
 	return RETURN_VAL();
 }
 
-RETURN_VAL vulkan_display::get_surface_format() {
+RETURN_VAL Vulkan_display::get_surface_format() {
 	std::vector<vk::SurfaceFormatKHR> formats;
 	CHECKED_ASSIGN(formats, gpu.getSurfaceFormatsKHR(surface));
 
@@ -242,7 +289,7 @@ RETURN_VAL vulkan_display::get_surface_format() {
 }
 
 
- RETURN_VAL vulkan_display::create_swap_chain() {
+ RETURN_VAL Vulkan_display::create_swap_chain() {
 	auto& capabilities = swapchain_atributes.capabilities;
 	CHECKED_ASSIGN(capabilities, gpu.getSurfaceCapabilitiesKHR(surface));
 
@@ -283,10 +330,11 @@ RETURN_VAL vulkan_display::get_surface_format() {
 }
 
 
-RETURN_VAL vulkan_display::create_swapchain_images() {
-	CHECKED_ASSIGN(swapchain_images, device.getSwapchainImagesKHR(swapchain));
+RETURN_VAL Vulkan_display::create_swapchain_images() {
+	std::vector<vk::Image> images;
+	CHECKED_ASSIGN(images, device.getSwapchainImagesKHR(swapchain));
+	uint32_t image_count = static_cast<uint32_t>(images.size());
 
-	uint32_t image_count = static_cast<uint32_t>(swapchain_images.size());
 	vk::ImageViewCreateInfo image_view_info{};
 	image_view_info
 		.setViewType(vk::ImageViewType::e2D)
@@ -302,25 +350,24 @@ RETURN_VAL vulkan_display::create_swapchain_images() {
 		.setLevelCount(1)
 		.setBaseArrayLayer(0)
 		.setLayerCount(1);
-	swapchain_image_views.resize(image_count);
+	
+
+	swapchain_images.resize(image_count);
 	for (uint32_t i = 0; i < image_count; i++) {
-		image_view_info.setImage(swapchain_images[i]);
-		CHECKED_ASSIGN(swapchain_image_views[i], device.createImageView(image_view_info));
+		Swapchain_image& image = swapchain_images[i];
+		image.image = std::move(images[i]);
+
+		image_view_info.setImage(swapchain_images[i].image);
+		CHECKED_ASSIGN(image.view, device.createImageView(image_view_info));
+		
+		
 	}
 
-
-	vk::FenceCreateInfo fence_info{};
-	fence_info.setFlags(vk::FenceCreateFlagBits::eSignaled);
-
-	swapchain_image_fences.resize(image_count);
-	for (uint32_t i = 0; i < image_count; i++) {
-		CHECKED_ASSIGN(swapchain_image_fences[i], device.createFence(fence_info));
-	}
 	return RETURN_VAL();
 }
 
 
-RETURN_VAL vulkan_display::create_render_pass(){
+RETURN_VAL Vulkan_display::create_render_pass(){
 	vk::RenderPassCreateInfo render_pass_info;
 
 	vk::AttachmentDescription color_attachment;
@@ -354,11 +401,21 @@ RETURN_VAL vulkan_display::create_render_pass(){
 	render_pass_info.setDependencies(subpass_dependency);
 
 	render_pass = device.createRenderPass(render_pass_info);
+
+	vk::ClearColorValue clear_color_value{};
+	clear_color_value.setFloat32({ 0.3f, 0.3f, 0.3f, 1.0f });
+	clear_color.setColor(clear_color_value);
+
+	render_pass_begin_info
+		.setRenderPass(render_pass)
+		.setRenderArea(vk::Rect2D{ {0,0}, image_size })
+		.setClearValues(clear_color);
+
 	return RETURN_VAL();
 }
 
 
-RETURN_VAL vulkan_display::create_graphics_pipeline(){
+RETURN_VAL Vulkan_display::create_graphics_pipeline(){
 	vk::PipelineLayoutCreateInfo pipeline_layout_info;
 	CHECKED_ASSIGN(pipeline_layout, device.createPipelineLayout(pipeline_layout_info));
 
@@ -433,124 +490,62 @@ RETURN_VAL vulkan_display::create_graphics_pipeline(){
 }
 
 
-RETURN_VAL vulkan_display::create_framebuffers() {
+RETURN_VAL Vulkan_display::create_framebuffers() {
 	vk::FramebufferCreateInfo framebuffer_info;
 	framebuffer_info
 		.setRenderPass(render_pass)
 		.setWidth(image_size.width)
 		.setHeight(image_size.height)
 		.setLayers(1);
-	swapchain_framebuffers.resize(swapchain_images.size());
-	for (size_t i = 0; i < swapchain_image_views.size(); i++) {
-		framebuffer_info.setAttachments(swapchain_image_views[i]);
-		CHECKED_ASSIGN(swapchain_framebuffers[i], device.createFramebuffer(framebuffer_info));
+	
+	for (size_t i = 0; i < swapchain_images.size(); i++) {
+		framebuffer_info.setAttachments(swapchain_images[i].view);
+		CHECKED_ASSIGN(swapchain_images[i].framebuffer, device.createFramebuffer(framebuffer_info));
 	}
 	return RETURN_VAL();
 }
 
+RETURN_VAL Vulkan_display::create_concurrent_paths()
+{
+	vk::SemaphoreCreateInfo semaphore_info;
 
-RETURN_VAL vulkan_display::create_command_pool() {
+	vk::FenceCreateInfo fence_info{};
+	fence_info.setFlags(vk::FenceCreateFlagBits::eSignaled);
+
+	concurent_paths.resize(concurent_paths_count);
+
+	for (auto& path : concurent_paths) {
+		CHECKED_ASSIGN(path.image_acquired_semaphore, device.createSemaphore(semaphore_info));
+		CHECKED_ASSIGN(path.image_rendered_semaphore, device.createSemaphore(semaphore_info));
+		CHECKED_ASSIGN(path.path_available_fence, device.createFence(fence_info));
+	}
+
+	return RETURN_VAL();
+}
+
+
+RETURN_VAL Vulkan_display::create_command_pool() {
 	vk::CommandPoolCreateInfo pool_info{};
-	pool_info.setQueueFamilyIndex(queue_family_index);
+	using bits = vk::CommandPoolCreateFlagBits;
+	pool_info
+		.setQueueFamilyIndex(queue_family_index)
+		.setFlags(bits::eTransient | bits::eResetCommandBuffer);
 	CHECKED_ASSIGN(command_pool, device.createCommandPool(pool_info));
 	return RETURN_VAL();
 }
 
 
-RETURN_VAL vulkan_display::create_command_buffers() {
+RETURN_VAL Vulkan_display::create_command_buffers() {
 	vk::CommandBufferAllocateInfo allocate_info{};
 	allocate_info
 		.setCommandPool(command_pool)
 		.setLevel(vk::CommandBufferLevel::ePrimary)
-		.setCommandBufferCount(static_cast<uint32_t>(swapchain_images.size()));
+		.setCommandBufferCount(static_cast<uint32_t>(concurent_paths_count));
 	CHECKED_ASSIGN(command_buffers, device.allocateCommandBuffers(allocate_info));
-
-
-	vk::ImageSubresourceRange image_range{};
-	image_range
-		.setAspectMask(vk::ImageAspectFlagBits::eColor)
-		.setLayerCount(1)
-		.setLevelCount(1);
-
-	/*vk::ImageMemoryBarrier render_begin_barrier{};
-	render_begin_barrier
-		.setOldLayout(vk::ImageLayout::eUndefined)
-		.setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
-		.setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-		.setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-		.setSubresourceRange(image_range);*/
-
-	/*vk::ImageMemoryBarrier second_barrier{};
-	second_barrier
-		.setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
-		.setNewLayout(vk::ImageLayout::ePresentSrcKHR)
-		.setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-		.setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-		.setSubresourceRange(image_range);*/
-
-	vk::ClearColorValue clear_color_value;
-	clear_color_value.setFloat32({0.3f, 0.3f, 0.3f, 1.0f});
-
-	vk::ClearValue clear_color{ clear_color_value };
-	vk::RenderPassBeginInfo render_pass_info{};
-	render_pass_info
-		.setRenderPass(render_pass)
-		.setRenderArea(vk::Rect2D{ {0,0}, image_size })
-		.setClearValues(clear_color);
-
-	vk::CommandBufferBeginInfo begin_info{};
-	for (uint32_t i = 0; i < command_buffers.size(); i++) {
-		//using p_flags = vk::PipelineStageFlagBits;
-		//first_barrier.setImage(swapchain_images[i]);
-		//second_barrier.setImage(swapchain_images[i]);
-		//command_buffers[i].pipelineBarrier(p_flags::eTopOfPipe, p_flags::eFragmentShader, vk::DependencyFlagBits::eByRegion, {}, {}, { first_barrier });
-		render_pass_info.setFramebuffer(swapchain_framebuffers[i]);
-		PASS_RESULT(command_buffers[i].begin(begin_info));
-		
-		
-		command_buffers[i].beginRenderPass(render_pass_info, vk::SubpassContents::eInline);
-		command_buffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-		command_buffers[i].draw(6, 1, 0, 0);
-		command_buffers[i].endRenderPass();
-		PASS_RESULT(command_buffers[i].end());
-	}
 	return RETURN_VAL();
 }
 
- //---------------------------------------PUBLIC------------------------------------------------
-
- RETURN_VAL vulkan_display::create_instance(std::vector<c_str>& required_extensions) {
-#ifdef _DEBUG
-	std::vector validation_layers{ "VK_LAYER_KHRONOS_validation" };
-	PASS_RESULT(check_validation_layers(validation_layers));
-#else
-	std::vector<c_str> validation_layers;
-#endif
-	const char* debug_extension = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-	required_extensions.push_back(debug_extension);
-	PASS_RESULT(check_instance_extensions(required_extensions));
-
-	vk::ApplicationInfo app_info{};
-	app_info.setApiVersion(VK_API_VERSION_1_0);
-
-	vk::InstanceCreateInfo instance_info{};
-	instance_info
-		.setPApplicationInfo(&app_info)
-		.setEnabledLayerCount(static_cast<uint32_t>(validation_layers.size()))
-		.setPpEnabledLayerNames(validation_layers.data())
-		.setEnabledExtensionCount(static_cast<uint32_t>(required_extensions.size()))
-		.setPpEnabledExtensionNames(required_extensions.data());
-	CHECKED_ASSIGN(instance, vk::createInstance(instance_info));
-
-#ifdef _DEBUG
-	PASS_RESULT(init_validation_layers_error_messenger());
-#endif
-
-	return RETURN_VAL();
-}
-
-
- RETURN_VAL vulkan_display::init_vulkan(VkSurfaceKHR surface, uint32_t width, uint32_t height) {
+ RETURN_VAL Vulkan_display::init_vulkan(VkSurfaceKHR surface, uint32_t width, uint32_t height) {
 	this->surface = surface;
 	this->image_size = vk::Extent2D{ width, height };
 	// Order of following calls is important
@@ -566,40 +561,94 @@ RETURN_VAL vulkan_display::create_command_buffers() {
 	PASS_RESULT(create_framebuffers());
 	PASS_RESULT(create_command_pool());
 	PASS_RESULT(create_command_buffers());
+	PASS_RESULT(create_concurrent_paths());
 	return RETURN_VAL();
 }
 
+ Vulkan_display::~Vulkan_display(){
+	device.waitIdle();
+	device.destroy(command_pool);
 
- RETURN_VAL vulkan_display::render() {
-	vk::SemaphoreCreateInfo semaphor_info{};
+	for (auto& path : concurent_paths) {
+		device.destroy(path.image_acquired_semaphore);
+		device.destroy(path.image_rendered_semaphore);
+		device.destroy(path.path_available_fence);
+	}
 
-	vk::Semaphore image_available_semaphore;
-	CHECKED_ASSIGN(image_available_semaphore, device.createSemaphore(semaphor_info));
-	auto [acquired, image_index] = device.acquireNextImageKHR(swapchain, UINT64_MAX, image_available_semaphore, nullptr);
+	device.destroy(pipeline_layout);
+	device.destroy(pipeline);
+	for (auto& image : swapchain_images) {
+		device.destroy(image.framebuffer);
+	}
+	device.destroy(render_pass);
+	device.destroy(fragment_shader);
+	device.destroy(vertex_shader);
+
+	for (auto& image : swapchain_images) {
+		device.destroy(image.view);
+		//image.image is destroyed by swapchain
+	}
+
+	device.destroy(swapchain);
+	instance.destroy(surface);
+	device.destroy();
+	instance.destroy(messenger);
+	instance.destroy();
+}
+
+
+RETURN_VAL Vulkan_display::record_commands(unsigned current_path_id, uint32_t image_index) {
+	render_pass_begin_info.setFramebuffer(swapchain_images[image_index].framebuffer);
+
+	vk::CommandBuffer& cmd_buffer = command_buffers[current_path_id];
+	cmd_buffer.reset();
+
+	vk::CommandBufferBeginInfo begin_info{};
+	PASS_RESULT(cmd_buffer.begin(begin_info));
+
+	cmd_buffer.beginRenderPass(render_pass_begin_info, vk::SubpassContents::eInline);
+	cmd_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+	cmd_buffer.draw(6, 1, 0, 0);
+	cmd_buffer.endRenderPass();
+
+	PASS_RESULT(cmd_buffer.end());
+
+	return RETURN_VAL();
+ }
+
+RETURN_VAL Vulkan_display::render() {
+	Path& path = concurent_paths[current_path_id];
+
+	CHECK(device.waitForFences(path.path_available_fence, VK_TRUE, UINT64_MAX),
+		"Waiting for fence failed.");
+	device.resetFences(path.path_available_fence);
+
+	auto [acquired, image_index] = device.acquireNextImageKHR(swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr);
 	CHECK(acquired, "Next swapchain image cannot be acquired.");
+	Swapchain_image& swapchain_image = swapchain_images[image_index];
 
-	vk::Semaphore image_prepared_semaphore;
-	CHECKED_ASSIGN(image_prepared_semaphore, device.createSemaphore(semaphor_info));
+	record_commands(current_path_id, image_index);
+
 	std::vector<vk::PipelineStageFlags> wait_masks{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
 	vk::SubmitInfo submit_info{};
 	submit_info
-		.setCommandBuffers(command_buffers[image_index])
-		.setSignalSemaphores(image_prepared_semaphore)
+		.setCommandBuffers(command_buffers[current_path_id])
 		.setWaitDstStageMask(wait_masks)
-		.setWaitSemaphores(image_available_semaphore);
-
-	CHECK(device.waitForFences(swapchain_image_fences[image_index], VK_TRUE, UINT64_MAX),
-		"Waiting for fence...");
-	device.resetFences(swapchain_image_fences[image_index]);
+		.setWaitSemaphores(path.image_acquired_semaphore)
+		.setSignalSemaphores(path.image_rendered_semaphore);
 	
-	PASS_RESULT(queue.submit(submit_info, swapchain_image_fences[image_index]));
+	PASS_RESULT(queue.submit(submit_info, path.path_available_fence));
 
 	vk::PresentInfoKHR present_info{};
 	present_info
 		.setImageIndices(image_index)
 		.setSwapchains(swapchain)
-		.setWaitSemaphores(image_prepared_semaphore);
+		.setWaitSemaphores(path.image_rendered_semaphore);
 	CHECK(queue.presentKHR(present_info), "Error when presenting image.");
+	
+	current_path_id++;
+	current_path_id %= concurent_paths_count;
+	
 	return RETURN_VAL();
 }
 
