@@ -2,5 +2,6 @@
 /.vs/*
 /.git/*
 /backup/*
+/resources/*
 *.user
 *.filters

@@ -102,9 +102,14 @@ class Vulkan_display {
 	vk::RenderPass render_pass;
 	vk::ClearValue clear_color;
 	vk::RenderPassBeginInfo render_pass_begin_info;
+
+	vk::Sampler sampler;
+	vk::DescriptorSetLayout descriptor_set_layout;
+	vk::DescriptorPool descriptor_pool;
+	std::vector<vk::DescriptorSet> descriptor_sets;
 	
-	vk::Pipeline pipeline;
 	vk::PipelineLayout pipeline_layout;
+	vk::Pipeline pipeline;
 
 	vk::CommandPool command_pool;
 	std::vector<vk::CommandBuffer> command_buffers;
@@ -118,6 +123,18 @@ class Vulkan_display {
 	};
 	std::vector<Path> concurent_paths;
 
+	vk::DeviceMemory transfer_image_memory;
+public:
+	struct Transfer_image {
+		vk::Image image;
+		vk::ImageView view;
+		void* ptr;
+		vk::ImageLayout layout = vk::ImageLayout::ePreinitialized;
+		vk::AccessFlagBits access = vk::AccessFlagBits::eMemoryWrite;
+	};
+private:
+	std::vector<Transfer_image> transfer_images;
+	vk::DeviceSize transfer_image_size;
 
 private:
 	RETURN_VAL init_validation_layers_error_messenger();
@@ -136,7 +153,17 @@ private:
 
 	RETURN_VAL create_swapchain_images();
 
+	RETURN_VAL create_texture_sampler();
+
+	RETURN_VAL create_descriptor_pool();
+
+	RETURN_VAL create_description_sets();
+
 	RETURN_VAL create_render_pass();
+
+	RETURN_VAL create_descriptor_set_layout();
+
+	RETURN_VAL create_pipeline_layout();
 
 	RETURN_VAL create_graphics_pipeline();
 
@@ -150,8 +177,9 @@ private:
 
 	RETURN_VAL create_concurrent_paths();
 
-	RETURN_VAL record_commands(unsigned current_path_id, uint32_t image_index);
+	RETURN_VAL create_transfer_images(uint32_t width, uint32_t height, vk::Format format = vk::Format::eR8G8B8A8Srgb);
 
+	RETURN_VAL record_graphics_commands(unsigned current_path_id, uint32_t image_index);
 public:
 	Vulkan_display() = default;
 
@@ -165,21 +193,5 @@ public:
 
 	RETURN_VAL init_vulkan(VkSurfaceKHR surface, uint32_t width, uint32_t height);
 
-	RETURN_VAL render();
+	RETURN_VAL render(unsigned char* frame, uint64_t size);
 };
-
-
-
-//-------------------------MAKRO_HELPER_FUNCTIONS---------------------
-/*#define CONCATENATE_IMPL(x, y) x##y
-#define CONCATENATE(x, y) CONCATENATE_IMPL(x, y)
-#define UNIQ(x) CONCATENATE(x, __LINE__)*/
-
-/*vk::ImageMemoryBarrier render_begin_barrier{};
-render_begin_barrier
-	.setOldLayout(vk::ImageLayout::eUndefined)
-	.setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
-	.setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-	.setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-	.setSubresourceRange(image_range);*/
-	//command_buffers[i].pipelineBarrier(p_flags::eTopOfPipe, p_flags::eFragmentShader, vk::DependencyFlagBits::eByRegion, {}, {}, { first_barrier });

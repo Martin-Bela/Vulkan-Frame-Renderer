@@ -44,6 +44,39 @@ namespace {
 	using c_str = const char*;
 	using namespace std::literals;
 
+	vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
+		vk::DeviceSize remainder = size % allignment;
+		if (remainder == 0)
+			return size;
+		return size + allignment - remainder;
+	}
+
+	vk::ImageMemoryBarrier create_memory_barrier(
+		Vulkan_display::Transfer_image& image,
+		vk::ImageLayout new_layout,
+		vk::AccessFlagBits new_access_mask,
+		uint32_t src_queue_family_index = VK_QUEUE_FAMILY_IGNORED,
+		uint32_t dst_queue_family_index = VK_QUEUE_FAMILY_IGNORED)
+	{
+		vk::ImageMemoryBarrier memory_barrier{};
+		memory_barrier
+			.setImage(image.image)
+			.setOldLayout(image.layout)
+			.setNewLayout(new_layout)
+			.setSrcAccessMask(image.access)
+			.setDstAccessMask(new_access_mask)
+			.setSrcQueueFamilyIndex(src_queue_family_index)
+			.setDstQueueFamilyIndex(dst_queue_family_index);
+		memory_barrier.subresourceRange
+			.setAspectMask(vk::ImageAspectFlagBits::eColor)
+			.setLayerCount(1)
+			.setLevelCount(1);
+
+		image.layout = new_layout;
+		image.access = new_access_mask;
+		return memory_barrier;
+	}
+
 	VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 		VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
 		VkDebugUtilsMessageTypeFlagsEXT messageType,
@@ -140,6 +173,44 @@ namespace {
 		CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
 		return RETURN_VAL();
 	}
+
+	vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
+		vk::ImageViewCreateInfo image_view_info{};
+		image_view_info
+			.setViewType(vk::ImageViewType::e2D)
+			.setFormat(format);
+		image_view_info.components
+			.setR(vk::ComponentSwizzle::eIdentity)
+			.setG(vk::ComponentSwizzle::eIdentity)
+			.setB(vk::ComponentSwizzle::eIdentity)
+			.setA(vk::ComponentSwizzle::eIdentity);
+		image_view_info.subresourceRange
+			.setAspectMask(vk::ImageAspectFlagBits::eColor)
+			.setBaseMipLevel(0)
+			.setLevelCount(1)
+			.setBaseArrayLayer(0)
+			.setLayerCount(1);
+		return image_view_info;
+	}
+
+	RETURN_VAL get_memory_type (
+		uint32_t& memory_type,
+		uint32_t memory_type_bits,
+		vk::MemoryPropertyFlags requested_properties,
+		vk::PhysicalDevice gpu)
+	{
+		auto supported_properties = gpu.getMemoryProperties();
+		for (uint32_t i = 0; i < supported_properties.memoryTypeCount; i++) {
+			auto& mem_type = supported_properties.memoryTypes[i];
+			if (((mem_type.propertyFlags & requested_properties) == requested_properties) &&
+				((1 << i) & memory_type_bits)) 
+			{
+				memory_type = i;
+				return RETURN_VAL();
+			}
+		}
+		CHECK(false, "No available memory for transfer images found.");
+	}
 } //namespace
 
 RETURN_VAL Vulkan_display::create_instance(std::vector<c_str>& required_extensions) {
@@ -193,7 +264,9 @@ RETURN_VAL Vulkan_display::create_physical_device() {
 	CHECKED_ASSIGN(gpus, instance.enumeratePhysicalDevices());
 
 	gpu = choose_GPU(gpus);
-	std::cout << "Vulkan uses GPU called: " << gpu.getProperties().deviceName.data() << std::endl;
+	auto properties = gpu.getProperties();
+
+	std::cout << "Vulkan uses GPU called: "s + properties.deviceName.data() << std::endl;
 	return RETURN_VAL();
 }
 
@@ -335,22 +408,7 @@ RETURN_VAL Vulkan_display::create_swapchain_images() {
 	CHECKED_ASSIGN(images, device.getSwapchainImagesKHR(swapchain));
 	uint32_t image_count = static_cast<uint32_t>(images.size());
 
-	vk::ImageViewCreateInfo image_view_info{};
-	image_view_info
-		.setViewType(vk::ImageViewType::e2D)
-		.setFormat(swapchain_atributes.format.format);
-	image_view_info.components
-		.setR(vk::ComponentSwizzle::eIdentity)
-		.setG(vk::ComponentSwizzle::eIdentity)
-		.setB(vk::ComponentSwizzle::eIdentity)
-		.setA(vk::ComponentSwizzle::eIdentity);
-	image_view_info.subresourceRange
-		.setAspectMask(vk::ImageAspectFlagBits::eColor)
-		.setBaseMipLevel(0)
-		.setLevelCount(1)
-		.setBaseArrayLayer(0)
-		.setLayerCount(1);
-	
+	vk::ImageViewCreateInfo image_view_info = default_image_view_create_info(swapchain_atributes.format.format);
 
 	swapchain_images.resize(image_count);
 	for (uint32_t i = 0; i < image_count; i++) {
@@ -359,8 +417,65 @@ RETURN_VAL Vulkan_display::create_swapchain_images() {
 
 		image_view_info.setImage(swapchain_images[i].image);
 		CHECKED_ASSIGN(image.view, device.createImageView(image_view_info));
-		
-		
+	}
+	return RETURN_VAL();
+}
+
+RETURN_VAL Vulkan_display::create_texture_sampler()
+{
+	vk::SamplerCreateInfo sampler_info;
+	sampler_info
+		.setMagFilter(vk::Filter::eLinear)
+		.setMinFilter(vk::Filter::eLinear)
+		.setAnisotropyEnable(false)
+		.setUnnormalizedCoordinates(false);
+	CHECKED_ASSIGN(sampler, device.createSampler(sampler_info));
+	return RETURN_VAL();
+}
+
+RETURN_VAL Vulkan_display::create_descriptor_pool()
+{
+	assert(concurent_paths_count != 0);
+	std::array<vk::DescriptorPoolSize, 1> descriptor_sizes{};
+	descriptor_sizes[0]
+		.setType(vk::DescriptorType::eCombinedImageSampler)
+		.setDescriptorCount(concurent_paths_count);
+	vk::DescriptorPoolCreateInfo pool_info{};
+	pool_info
+		.setPoolSizes(descriptor_sizes)
+		.setMaxSets(concurent_paths_count);
+	CHECKED_ASSIGN(descriptor_pool, device.createDescriptorPool(pool_info));
+	return RETURN_VAL();
+}
+
+RETURN_VAL Vulkan_display::create_description_sets() {
+	assert(descriptor_pool);
+	std::vector<vk::DescriptorSetLayout> layouts(concurent_paths_count, descriptor_set_layout);
+	vk::DescriptorSetAllocateInfo allocate_info;
+	allocate_info
+		.setDescriptorSetCount(concurent_paths_count)
+		.setDescriptorPool(descriptor_pool)
+		.setSetLayouts(layouts);
+
+	CHECKED_ASSIGN(descriptor_sets, device.allocateDescriptorSets(allocate_info));
+
+	vk::DescriptorImageInfo description_image_info;
+	description_image_info
+		.setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+		.setSampler(sampler);
+	
+	std::array<vk::WriteDescriptorSet, 1> descriptor_writes{};
+	descriptor_writes[0]
+		.setDstBinding(1)
+		.setDstArrayElement(0)
+		.setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+		.setDescriptorCount(1)
+		.setPImageInfo(&description_image_info);
+
+	for (unsigned i = 0; i < concurent_paths_count; i++) {
+		description_image_info.setImageView(transfer_images[i].view);
+		descriptor_writes[0].setDstSet(descriptor_sets[i]);
+		device.updateDescriptorSets(descriptor_writes, nullptr);
 	}
 
 	return RETURN_VAL();
@@ -395,6 +510,7 @@ RETURN_VAL Vulkan_display::create_render_pass(){
 	vk::SubpassDependency subpass_dependency{};
 	subpass_dependency
 		.setSrcSubpass(VK_SUBPASS_EXTERNAL)
+		.setDstSubpass(0)
 		.setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
 		.setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
 		.setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite);
@@ -413,13 +529,29 @@ RETURN_VAL Vulkan_display::create_render_pass(){
 
 	return RETURN_VAL();
 }
-
+RETURN_VAL Vulkan_display::create_descriptor_set_layout() {
+	vk::DescriptorSetLayoutBinding sampler_layout_binding;
+	sampler_layout_binding
+		.setBinding(1)
+		.setDescriptorCount(1)
+		.setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+		.setStageFlags(vk::ShaderStageFlagBits::eFragment)
+		.setImmutableSamplers(sampler);
+	vk::DescriptorSetLayoutCreateInfo descriptor_set_layout_info{};
+	descriptor_set_layout_info
+		.setBindings(sampler_layout_binding);
+	CHECKED_ASSIGN(descriptor_set_layout, 
+		device.createDescriptorSetLayout(descriptor_set_layout_info));
+}
 
 RETURN_VAL Vulkan_display::create_graphics_pipeline(){
+	create_descriptor_set_layout();
+	
 	vk::PipelineLayoutCreateInfo pipeline_layout_info;
+	pipeline_layout_info.setSetLayouts(descriptor_set_layout);
 	CHECKED_ASSIGN(pipeline_layout, device.createPipelineLayout(pipeline_layout_info));
 
-
+	
 	vk::GraphicsPipelineCreateInfo pipeline_info{};
 	
 	std::array<vk::PipelineShaderStageCreateInfo, 2> shader_stages_infos;
@@ -505,6 +637,8 @@ RETURN_VAL Vulkan_display::create_framebuffers() {
 	return RETURN_VAL();
 }
 
+
+
 RETURN_VAL Vulkan_display::create_concurrent_paths()
 {
 	vk::SemaphoreCreateInfo semaphore_info;
@@ -523,6 +657,55 @@ RETURN_VAL Vulkan_display::create_concurrent_paths()
 	return RETURN_VAL();
 }
 
+
+RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t height, vk::Format format) {
+	vk::ImageCreateInfo image_info;
+	image_info
+		.setImageType(vk::ImageType::e2D)
+		.setExtent(vk::Extent3D{ width, height, 1})
+		.setMipLevels(1)
+		.setArrayLayers(1)
+		.setFormat(format)
+		.setTiling(vk::ImageTiling::eLinear)
+		.setInitialLayout(vk::ImageLayout::ePreinitialized)
+		.setUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst)
+		.setSharingMode(vk::SharingMode::eExclusive)
+		.setSamples(vk::SampleCountFlagBits::e1);
+
+	transfer_images.resize(concurent_paths_count);
+	for (auto& image : transfer_images) {
+		CHECKED_ASSIGN(image.image, device.createImage(image_info));
+	}
+
+	vk::MemoryRequirements memory_requirements = device.getImageMemoryRequirements(transfer_images[0].image);
+	using mem_bits = vk::MemoryPropertyFlagBits;
+	uint32_t memory_type;
+	PASS_RESULT(get_memory_type(memory_type, memory_requirements.memoryTypeBits, 
+		mem_bits::eHostVisible | mem_bits::eHostCoherent, gpu));
+	
+	vk::DeviceSize image_size = add_padding(memory_requirements.size, memory_requirements.alignment);
+	vk::MemoryAllocateInfo allocInfo{};
+	allocInfo
+		.setAllocationSize(image_size * concurent_paths_count)
+		.setMemoryTypeIndex(memory_type);
+	CHECKED_ASSIGN(transfer_image_memory, device.allocateMemory(allocInfo));
+
+	auto ptr = device.mapMemory(transfer_image_memory, 0, image_size * concurent_paths_count);
+	CHECK(ptr != nullptr, "Image memory cannot be mapped.");
+	
+	for (size_t i = 0; i < transfer_images.size(); i++) {
+		device.bindImageMemory(transfer_images[i].image, transfer_image_memory, i * image_size);
+		transfer_images[i].ptr = reinterpret_cast<unsigned char*>(ptr) + i * image_size;
+	}
+	vk::ImageViewCreateInfo view_info = default_image_view_create_info(format);
+
+	for (auto& image : transfer_images) {
+		view_info.setImage(image.image);
+		CHECKED_ASSIGN(image.view, device.createImageView(view_info));
+	}
+
+	transfer_image_size = memory_requirements.size;
+}
 
 RETURN_VAL Vulkan_display::create_command_pool() {
 	vk::CommandPoolCreateInfo pool_info{};
@@ -545,7 +728,7 @@ RETURN_VAL Vulkan_display::create_command_buffers() {
 	return RETURN_VAL();
 }
 
- RETURN_VAL Vulkan_display::init_vulkan(VkSurfaceKHR surface, uint32_t width, uint32_t height) {
+RETURN_VAL Vulkan_display::init_vulkan(VkSurfaceKHR surface, uint32_t width, uint32_t height) {
 	this->surface = surface;
 	this->image_size = vk::Extent2D{ width, height };
 	// Order of following calls is important
@@ -557,15 +740,19 @@ RETURN_VAL Vulkan_display::create_command_buffers() {
 	PASS_RESULT(create_shader(vertex_shader, "shaders/vert.spv", device));
 	PASS_RESULT(create_shader(fragment_shader, "shaders/frag.spv", device));
 	PASS_RESULT(create_render_pass());
+	PASS_RESULT(create_texture_sampler());
 	PASS_RESULT(create_graphics_pipeline());
 	PASS_RESULT(create_framebuffers());
 	PASS_RESULT(create_command_pool());
 	PASS_RESULT(create_command_buffers());
 	PASS_RESULT(create_concurrent_paths());
+	PASS_RESULT(create_transfer_images(width, height));
+	PASS_RESULT(create_descriptor_pool());
+	PASS_RESULT(create_description_sets());
 	return RETURN_VAL();
 }
 
- Vulkan_display::~Vulkan_display(){
+Vulkan_display::~Vulkan_display(){
 	device.waitIdle();
 	device.destroy(command_pool);
 
@@ -596,38 +783,58 @@ RETURN_VAL Vulkan_display::create_command_buffers() {
 	instance.destroy();
 }
 
-
-RETURN_VAL Vulkan_display::record_commands(unsigned current_path_id, uint32_t image_index) {
-	render_pass_begin_info.setFramebuffer(swapchain_images[image_index].framebuffer);
+RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {
+	
 
 	vk::CommandBuffer& cmd_buffer = command_buffers[current_path_id];
 	cmd_buffer.reset();
 
 	vk::CommandBufferBeginInfo begin_info{};
+	begin_info.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
 	PASS_RESULT(cmd_buffer.begin(begin_info));
 
+
+	auto render_begin_memory_barrier = create_memory_barrier(transfer_images[current_path_id],
+		vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+	cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eFragmentShader,
+		vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_begin_memory_barrier);
+
+	render_pass_begin_info.setFramebuffer(swapchain_images[image_index].framebuffer);
 	cmd_buffer.beginRenderPass(render_pass_begin_info, vk::SubpassContents::eInline);
+	
 	cmd_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+	cmd_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+		pipeline_layout, 0, descriptor_sets[current_path_id], nullptr);
 	cmd_buffer.draw(6, 1, 0, 0);
+	
 	cmd_buffer.endRenderPass();
+
+	auto render_end_memory_barrier = create_memory_barrier(transfer_images[current_path_id],
+		vk::ImageLayout::eGeneral, vk::AccessFlagBits::eMemoryWrite);
+	cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eBottomOfPipe,
+		vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_end_memory_barrier);
+
 
 	PASS_RESULT(cmd_buffer.end());
 
 	return RETURN_VAL();
  }
 
-RETURN_VAL Vulkan_display::render() {
+RETURN_VAL Vulkan_display::render(unsigned char* frame, uint64_t size) {
 	Path& path = concurent_paths[current_path_id];
 
 	CHECK(device.waitForFences(path.path_available_fence, VK_TRUE, UINT64_MAX),
 		"Waiting for fence failed.");
 	device.resetFences(path.path_available_fence);
 
+	assert(size == static_cast<uint64_t>(transfer_image_size));
+	memcpy(transfer_images[current_path_id].ptr, frame, transfer_image_size);
+
 	auto [acquired, image_index] = device.acquireNextImageKHR(swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr);
 	CHECK(acquired, "Next swapchain image cannot be acquired.");
 	Swapchain_image& swapchain_image = swapchain_images[image_index];
 
-	record_commands(current_path_id, image_index);
+	record_graphics_commands(current_path_id, image_index);
 
 	std::vector<vk::PipelineStageFlags> wait_masks{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
 	vk::SubmitInfo submit_info{};
