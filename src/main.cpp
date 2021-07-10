@@ -8,8 +8,6 @@
 #include <iostream>
 
 
-
-
 namespace {
 	using c_str = const char*;
 
@@ -47,51 +45,85 @@ namespace {
 		return true;
 	}
 }
+
+
+struct GLFW_vulkan_display : public Window_inteface {
+	bool glfw_initialised = false;
+	GLFWwindow* window = nullptr;
+	Vulkan_display vulkan;
 	
+	unsigned char* image;
+	int image_width, image_height;
+
+	GLFW_vulkan_display() {
+		
+		image = stbi_load("./resources/picture.png", &image_width, &image_height, nullptr, 4);
+		assert(image);
+
+
+		if (!glfwInit()) {
+			throw std::runtime_error{ "GLFW cannot be initialised." };
+		}
+		glfw_initialised = true;
+		glfwSetErrorCallback(glfw_error_callback);
+
+		std::vector<c_str> required_extensions;
+		if (!get_glfw_vulkan_required_extensions(required_extensions)) {
+			throw std::runtime_error{ "Vulkan is not supported by glfw." };
+		}
+
+		vulkan.create_instance(required_extensions);
+
+		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+		window = glfwCreateWindow(800, 800, "GLFW/Vulkan Window", NULL, NULL);
+		if (!window) {
+			throw std::runtime_error{ "Window cannot be created." };
+		}
+
+		glfwSetKeyCallback(window, key_callback);
+
+
+		VkSurfaceKHR raw_surface;
+		if (glfwCreateWindowSurface(vulkan.get_instance(), window, NULL, &raw_surface) != VK_SUCCESS) {
+			throw std::runtime_error{ "Vulkan surface cannot be created." };
+		}
+
+
+		vulkan.init(raw_surface, this);
+	}
+
+	int main() {
+		while (!glfwWindowShouldClose(window)) {
+			glfwPollEvents();
+			vulkan.render(image, static_cast<uint64_t>(image_width) * image_height * 4);
+		}
+
+		return 0;
+	}
+
+	~GLFW_vulkan_display() {
+		if (glfw_initialised) {
+			glfwTerminate();
+		}
+		if (window) {
+			glfwDestroyWindow(window);
+		}
+	}
+
+
+
+	// Inherited via window_inteface
+	virtual std::pair<uint32_t, uint32_t> get_window_size() override
+	{
+		int width, height;
+		glfwGetFramebufferSize(window, &width, &height);
+		return {static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
+	}
+
+};
+
 
 int main() {
-	int width, height;
-
-	unsigned char* image = stbi_load("./resources/picture.png", &width, &height, nullptr, 4);
-	assert(image);
-
-	
-	if (!glfwInit()) {
-		std::cout<<"GLFW cannot be initialised." <<std::endl;
-		return -1;
-	}
-	scope_exit glfw_deleter( []{ glfwTerminate(); } );
-	glfwSetErrorCallback(glfw_error_callback);
-
-	std::vector<c_str> required_extensions;
-	if (!get_glfw_vulkan_required_extensions(required_extensions)) return -1;
-
-
-	Vulkan_display vulkan;
-	vulkan.create_instance(required_extensions);
-
-	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	GLFWwindow* window_ptr = glfwCreateWindow(800, 800, "GLFW/Vulkan Window", NULL, NULL);
-	if (!window_ptr) {
-		return -1;
-	}
-	auto window_deleter = [](GLFWwindow* window) { glfwDestroyWindow(window); };
-	std::unique_ptr<GLFWwindow, decltype(window_deleter)> window(window_ptr, window_deleter);
-
-	glfwSetKeyCallback(window_ptr, key_callback);
-
-
-	VkSurfaceKHR raw_surface;
-	if (glfwCreateWindowSurface(vulkan.get_instance(), window_ptr, NULL, &raw_surface) != VK_SUCCESS) {
-		std::cout << "Window cannot be created." << std::endl;
-	}
-	
-	vulkan.init_vulkan(raw_surface, 800, 800);
-
-	while (!glfwWindowShouldClose(window_ptr)) {
-		glfwPollEvents();
-		vulkan.render(image, static_cast<uint64_t>( width ) * height * 4);
-	}
-	
-	return 0;
+	GLFW_vulkan_display display{};
+	return display.main();
 }
