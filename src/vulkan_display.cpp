@@ -421,6 +421,21 @@ RETURN_VAL Vulkan_display::create_swapchain_images() {
 	return RETURN_VAL();
 }
 
+RETURN_VAL Vulkan_display::create_viewport_and_scissor()
+{
+	viewport
+		.setX(0.f)
+		.setY(0.f)
+		.setWidth(static_cast<float>(image_size.width))
+		.setHeight(static_cast<float>(image_size.height))
+		.setMinDepth(0.f)
+		.setMaxDepth(1.f);
+	scissor
+		.setOffset({0,0})
+		.setExtent(image_size);
+	return RETURN_VAL();
+}
+
 RETURN_VAL Vulkan_display::create_texture_sampler()
 {
 	vk::SamplerCreateInfo sampler_info;
@@ -572,22 +587,10 @@ RETURN_VAL Vulkan_display::create_graphics_pipeline(){
 	input_assembly_state_info.setTopology(vk::PrimitiveTopology::eTriangleList);
 	pipeline_info.setPInputAssemblyState(&input_assembly_state_info);
 
-	vk::Viewport viewport{};
-	viewport
-		.setX(0.f)
-		.setY(0.f)
-		.setWidth(static_cast<float>(image_size.width))
-		.setHeight(static_cast<float>(image_size.height))
-		.setMinDepth(0.f)
-		.setMaxDepth(1.f);
-	vk::Rect2D scissor{};
-	scissor
-		.setOffset({0,0})
-		.setExtent(image_size);
 	vk::PipelineViewportStateCreateInfo viewport_state_info;
 	viewport_state_info
-		.setViewports(viewport)
-		.setScissors(scissor);
+		.setScissorCount(1)
+		.setViewportCount(1);
 	pipeline_info.setPViewportState(&viewport_state_info);
 
 	vk::PipelineRasterizationStateCreateInfo rasterization_info{};
@@ -611,6 +614,11 @@ RETURN_VAL Vulkan_display::create_graphics_pipeline(){
 	color_blend_info.setAttachments(color_blend_attachment);
 	pipeline_info.setPColorBlendState(&color_blend_info);
 
+	std::array dynamic_states{vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+	vk::PipelineDynamicStateCreateInfo dynamic_state_info{};
+	dynamic_state_info.setDynamicStates(dynamic_states);
+	pipeline_info.setPDynamicState(&dynamic_state_info);
+	
 	pipeline_info
 		.setLayout(pipeline_layout)
 		.setRenderPass(render_pass);
@@ -737,6 +745,7 @@ RETURN_VAL Vulkan_display::init_vulkan(VkSurfaceKHR surface, uint32_t width, uin
 	PASS_RESULT(create_logical_device());
 	queue = device.getQueue(queue_family_index, 0);
 	PASS_RESULT(create_swap_chain());
+	PASS_RESULT(create_viewport_and_scissor());
 	PASS_RESULT(create_shader(vertex_shader, "shaders/vert.spv", device));
 	PASS_RESULT(create_shader(fragment_shader, "shaders/frag.spv", device));
 	PASS_RESULT(create_render_pass());
@@ -783,6 +792,11 @@ Vulkan_display::~Vulkan_display(){
 	instance.destroy();
 }
 
+RETURN_VAL Vulkan_display::resize(uint32_t width, uint32_t height)
+{
+	return RETURN_VAL();
+}
+
 RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {
 	
 
@@ -803,6 +817,8 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 	cmd_buffer.beginRenderPass(render_pass_begin_info, vk::SubpassContents::eInline);
 	
 	cmd_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+	cmd_buffer.setScissor(0, scissor);
+	cmd_buffer.setViewport(0, viewport);
 	cmd_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
 		pipeline_layout, 0, descriptor_sets[current_path_id], nullptr);
 	cmd_buffer.draw(6, 1, 0, 0);
@@ -858,5 +874,7 @@ RETURN_VAL Vulkan_display::render(unsigned char* frame, uint64_t size) {
 	
 	return RETURN_VAL();
 }
+
+
 
 

@@ -95,6 +95,8 @@ class Vulkan_display {
 	std::vector<Swapchain_image> swapchain_images;
 
 	vk::Extent2D image_size{ 0, 0 };
+	vk::Viewport viewport;
+	vk::Rect2D scissor;
 
 	vk::ShaderModule vertex_shader;
 	vk::ShaderModule fragment_shader;
@@ -153,6 +155,8 @@ private:
 
 	RETURN_VAL create_swapchain_images();
 
+	RETURN_VAL create_viewport_and_scissor();
+
 	RETURN_VAL create_texture_sampler();
 
 	RETURN_VAL create_descriptor_pool();
@@ -193,5 +197,8 @@ public:
 
 	RETURN_VAL init_vulkan(VkSurfaceKHR surface, uint32_t width, uint32_t height);
 
+	RETURN_VAL resize(uint32_t width, uint32_t height);
+
 	RETURN_VAL render(unsigned char* frame, uint64_t size);
+
 };
