@@ -102,11 +102,11 @@ struct GLFW_vulkan_display : public Window_inteface {
 	}
 
 	~GLFW_vulkan_display() {
-		if (glfw_initialised) {
-			glfwTerminate();
-		}
 		if (window) {
 			glfwDestroyWindow(window);
+		}
+		if (glfw_initialised) {
+			glfwTerminate();
 		}
 	}
 

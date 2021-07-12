@@ -96,9 +96,8 @@ namespace vulkan_display_detail {
 		};
 		std::vector<Swapchain_image> swapchain_images;
 
-		vk::Extent2D image_size{ 0, 0 };
-		vk::Viewport viewport;
-		vk::Rect2D scissor;
+		vk::Extent2D window_size{ 0, 0 };
+
 	private:
 
 		RETURN_VAL init_validation_layers_error_messenger();
@@ -116,8 +115,6 @@ namespace vulkan_display_detail {
 		RETURN_VAL create_swap_chain(vk::SwapchainKHR old_swap_chain = VK_NULL_HANDLE);
 
 		RETURN_VAL create_swapchain_views();
-
-		RETURN_VAL create_viewport_and_scissor();
 
 		void destroy_swapchain_views() {
 			for (auto& image : swapchain_images) {

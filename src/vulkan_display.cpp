@@ -23,34 +23,6 @@ namespace {
 		return size + allignment - remainder;
 	}
 
-	vk::ImageMemoryBarrier create_memory_barrier(
-		Vulkan_display::Transfer_image& image,
-		vk::ImageLayout new_layout,
-		vk::AccessFlagBits new_access_mask,
-		uint32_t src_queue_family_index = VK_QUEUE_FAMILY_IGNORED,
-		uint32_t dst_queue_family_index = VK_QUEUE_FAMILY_IGNORED)
-	{
-		vk::ImageMemoryBarrier memory_barrier{};
-		memory_barrier
-			.setImage(image.image)
-			.setOldLayout(image.layout)
-			.setNewLayout(new_layout)
-			.setSrcAccessMask(image.access)
-			.setDstAccessMask(new_access_mask)
-			.setSrcQueueFamilyIndex(src_queue_family_index)
-			.setDstQueueFamilyIndex(dst_queue_family_index);
-		memory_barrier.subresourceRange
-			.setAspectMask(vk::ImageAspectFlagBits::eColor)
-			.setLayerCount(1)
-			.setLevelCount(1);
-
-		image.layout = new_layout;
-		image.access = new_access_mask;
-		return memory_barrier;
-	}
-
-
-
 	RETURN_VAL create_shader(vk::ShaderModule& shader, 
 		const std::filesystem::path& file_path, 
 		const vk::Device& device) 
@@ -90,7 +62,31 @@ namespace {
 	}
 } //namespace
 
+vk::ImageMemoryBarrier  Vulkan_display::create_memory_barrier(
+	Vulkan_display::Transfer_image& image,
+	vk::ImageLayout new_layout,
+	vk::AccessFlagBits new_access_mask,
+	uint32_t src_queue_family_index,
+	uint32_t dst_queue_family_index)
+{
+	vk::ImageMemoryBarrier memory_barrier{};
+	memory_barrier
+		.setImage(image.image)
+		.setOldLayout(image.layout)
+		.setNewLayout(new_layout)
+		.setSrcAccessMask(image.access)
+		.setDstAccessMask(new_access_mask)
+		.setSrcQueueFamilyIndex(src_queue_family_index)
+		.setDstQueueFamilyIndex(dst_queue_family_index);
+	memory_barrier.subresourceRange
+		.setAspectMask(vk::ImageAspectFlagBits::eColor)
+		.setLayerCount(1)
+		.setLevelCount(1);
 
+	image.layout = new_layout;
+	image.access = new_access_mask;
+	return memory_barrier;
+}
 
 
 RETURN_VAL Vulkan_display::create_texture_sampler()
@@ -197,16 +193,24 @@ RETURN_VAL Vulkan_display::create_render_pass(){
 	return RETURN_VAL();
 }
 RETURN_VAL Vulkan_display::create_descriptor_set_layout() {
-	vk::DescriptorSetLayoutBinding sampler_layout_binding;
-	sampler_layout_binding
+	std::array< vk::DescriptorSetLayoutBinding, 2> descriptor_set_layout_bindings;
+	descriptor_set_layout_bindings[0]
+		.setBinding(0)
+		.setDescriptorCount(1)
+		.setDescriptorType(vk::DescriptorType::eUniformBuffer)
+		.setStageFlags(vk::ShaderStageFlagBits::eFragment)
+		.setImmutableSamplers(nullptr);
+
+	descriptor_set_layout_bindings[1]
 		.setBinding(1)
 		.setDescriptorCount(1)
 		.setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
 		.setStageFlags(vk::ShaderStageFlagBits::eFragment)
 		.setImmutableSamplers(sampler);
+
 	vk::DescriptorSetLayoutCreateInfo descriptor_set_layout_info{};
 	descriptor_set_layout_info
-		.setBindings(sampler_layout_binding);
+		.setBindings(descriptor_set_layout_bindings);
 	CHECKED_ASSIGN(descriptor_set_layout, 
 		device.createDescriptorSetLayout(descriptor_set_layout_info));
 }
@@ -214,7 +218,16 @@ RETURN_VAL Vulkan_display::create_descriptor_set_layout() {
 RETURN_VAL Vulkan_display::create_graphics_pipeline(){
 	create_descriptor_set_layout();
 	
-	vk::PipelineLayoutCreateInfo pipeline_layout_info;
+
+	vk::PipelineLayoutCreateInfo pipeline_layout_info{};
+	
+	vk::PushConstantRange push_constants;
+	push_constants
+		.setOffset(0)
+		.setSize(sizeof(render_area))
+		.setStageFlags(vk::ShaderStageFlagBits::eFragment);
+	pipeline_layout_info.setPushConstantRanges(push_constants);
+
 	pipeline_layout_info.setSetLayouts(descriptor_set_layout);
 	CHECKED_ASSIGN(pipeline_layout, device.createPipelineLayout(pipeline_layout_info));
 
@@ -270,7 +283,7 @@ RETURN_VAL Vulkan_display::create_graphics_pipeline(){
 	vk::PipelineDynamicStateCreateInfo dynamic_state_info{};
 	dynamic_state_info.setDynamicStates(dynamic_states);
 	pipeline_info.setPDynamicState(&dynamic_state_info);
-	
+
 	pipeline_info
 		.setLayout(pipeline_layout)
 		.setRenderPass(render_pass);
@@ -303,6 +316,7 @@ RETURN_VAL Vulkan_display::create_concurrent_paths()
 
 
 RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t height, vk::Format format) {
+	transfer_image_size = vk::Extent2D{ width, height };
 	vk::ImageCreateInfo image_info;
 	image_info
 		.setImageType(vk::ImageType::e2D)
@@ -348,7 +362,7 @@ RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
 		CHECKED_ASSIGN(image.view, device.createImageView(view_info));
 	}
 
-	transfer_image_size = memory_requirements.size;
+	transfer_image_byte_size = memory_requirements.size;
 }
 
 RETURN_VAL Vulkan_display::create_command_pool() {
@@ -372,6 +386,41 @@ RETURN_VAL Vulkan_display::create_command_buffers() {
 	return RETURN_VAL();
 }
 
+RETURN_VAL Vulkan_display::update_render_area() {
+	vk::Extent2D wnd_size = context.window_size;
+	vk::Extent2D img_size = transfer_image_size;
+
+	double wnd_aspect = static_cast<double>( wnd_size.width ) / wnd_size.height;
+	double img_aspect = static_cast<double>( img_size.width ) / img_size.height;
+
+
+	if (wnd_aspect > img_aspect) {
+		render_area.height = wnd_size.height;
+		render_area.width = static_cast<uint32_t>(std::round(wnd_size.height * img_aspect));
+		render_area.x = static_cast<uint32_t>((wnd_size.width - render_area.width) / 2);
+		render_area.y = 0;
+	}
+	else {
+		render_area.width = wnd_size.width;
+		render_area.height = std::round(wnd_size.width / img_aspect);
+		render_area.x = 0;
+		render_area.y = (wnd_size.height - render_area.height) / 2;
+		
+	}
+	
+	viewport
+		.setX(static_cast<float>(render_area.x))
+		.setY(static_cast<float>(render_area.y))
+		.setWidth(static_cast<float>(render_area.width))
+		.setHeight(static_cast<float>(render_area.height))
+		.setMinDepth(0.f)
+		.setMaxDepth(1.f);
+	scissor
+		.setOffset({ static_cast<int32_t>(render_area.x), static_cast<int32_t>(render_area.y) })
+		.setExtent({ render_area.width, render_area.height });
+	return RETURN_VAL();
+}
+
 RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, Window_inteface* window) {
 	// Order of following calls is important
 	this->window = window;
@@ -390,6 +439,7 @@ RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, Window_inteface* window) {
 	PASS_RESULT(create_transfer_images(width, height));
 	PASS_RESULT(create_descriptor_pool());
 	PASS_RESULT(create_description_sets());
+	PASS_RESULT(update_render_area());
 	return RETURN_VAL();
 }
 
@@ -428,14 +478,16 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 	vk::RenderPassBeginInfo render_pass_begin_info;
 	render_pass_begin_info
 		.setRenderPass(render_pass)
-		.setRenderArea(vk::Rect2D{ {0,0}, context.image_size })
+		.setRenderArea(vk::Rect2D{ {0,0}, context.window_size })
 		.setClearValues(clear_color)
 		.setFramebuffer(context.get_framebuffer(image_index));
 	cmd_buffer.beginRenderPass(render_pass_begin_info, vk::SubpassContents::eInline);
 	
 	cmd_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-	cmd_buffer.setScissor(0, context.scissor);
-	cmd_buffer.setViewport(0, context.viewport);
+
+	cmd_buffer.setScissor(0, scissor);
+	cmd_buffer.setViewport(0, viewport);
+	cmd_buffer.pushConstants(pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0, sizeof(render_area), &render_area);
 	cmd_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
 		pipeline_layout, 0, descriptor_sets[current_path_id], nullptr);
 	cmd_buffer.draw(6, 1, 0, 0);
@@ -460,8 +512,8 @@ RETURN_VAL Vulkan_display::render(unsigned char* frame, uint64_t size) {
 		"Waiting for fence failed.");
 	device.resetFences(path.path_available_fence);
 
-	assert(size == static_cast<uint64_t>(transfer_image_size));
-	memcpy(transfer_images[current_path_id].ptr, frame, transfer_image_size);
+	assert(size == static_cast<uint64_t>(transfer_image_byte_size));
+	memcpy(transfer_images[current_path_id].ptr, frame, transfer_image_byte_size);
 	uint32_t image_index;
 	auto acquired = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr, &image_index);
 	while (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {

@@ -13,6 +13,9 @@ class Vulkan_display {
 	vulkan_display_detail::Vulkan_context context;
 	vk::Device device;
 
+	vk::Viewport viewport;
+	vk::Rect2D scissor;
+
 	vk::ShaderModule vertex_shader;
 	vk::ShaderModule fragment_shader;
 	
@@ -40,7 +43,7 @@ class Vulkan_display {
 	std::vector<Path> concurent_paths;
 
 	vk::DeviceMemory transfer_image_memory;
-public:
+
 	struct Transfer_image {
 		vk::Image image;
 		vk::ImageView view;
@@ -48,11 +51,25 @@ public:
 		vk::ImageLayout layout = vk::ImageLayout::ePreinitialized;
 		vk::AccessFlagBits access = vk::AccessFlagBits::eMemoryWrite;
 	};
-private:
 	std::vector<Transfer_image> transfer_images;
-	vk::DeviceSize transfer_image_size;
-
+	
+	vk::Extent2D transfer_image_size;
+	vk::DeviceSize transfer_image_byte_size;
+	struct {
+		uint32_t x;
+		uint32_t y;
+		uint32_t width;
+		uint32_t height;
+	} render_area;
 private:
+	vk::ImageMemoryBarrier create_memory_barrier(
+		Vulkan_display::Transfer_image& image,
+		vk::ImageLayout new_layout,
+		vk::AccessFlagBits new_access_mask,
+		uint32_t src_queue_family_index = VK_QUEUE_FAMILY_IGNORED,
+		uint32_t dst_queue_family_index = VK_QUEUE_FAMILY_IGNORED);
+
+
 	RETURN_VAL create_texture_sampler();
 
 	RETURN_VAL create_descriptor_pool();
@@ -78,6 +95,8 @@ private:
 	RETURN_VAL create_transfer_images(uint32_t width, uint32_t height, vk::Format format = vk::Format::eR8G8B8A8Srgb);
 
 	RETURN_VAL record_graphics_commands(unsigned current_path_id, uint32_t image_index);
+
+	RETURN_VAL update_render_area();
 public:
 	Vulkan_display() = default;
 
@@ -96,6 +115,7 @@ public:
 	RETURN_VAL resize_window() {
 		auto [width, height] = window->get_window_size();
 		context.recreate_swapchain(vk::Extent2D{width, height}, render_pass);
+		update_render_area();
 		return RETURN_VAL();
 	}
 

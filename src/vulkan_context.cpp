@@ -61,10 +61,12 @@ namespace {
 		VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
 		VkDebugUtilsMessageTypeFlagsEXT messageType,
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-		void* pUserData) {
-
+		void* pUserData) 
+	{
+		if (strstr(pCallbackData->pMessage, "VUID-vkDestroyDevice-device-00378") != NULL) {
+			return VK_FALSE;
+		}
 		std::cout << "validation layer: " << pCallbackData->pMessage << '\n' << std::endl;
-
 		return VK_FALSE;
 	}
 
@@ -191,7 +193,6 @@ namespace vulkan_display_detail {
 
 		gpu = choose_GPU(gpus);
 		auto properties = gpu.getProperties();
-
 		std::cout << "Vulkan uses GPU called: "s + properties.deviceName.data() << std::endl;
 		return RETURN_VAL();
 	}
@@ -295,10 +296,10 @@ namespace vulkan_display_detail {
 		PASS_RESULT(get_present_mode());
 		PASS_RESULT(get_surface_format());
 
-		image_size.width = std::clamp(image_size.width,
+		window_size.width = std::clamp(window_size.width,
 			capabilities.minImageExtent.width,
 			capabilities.maxImageExtent.width);
-		image_size.height = std::clamp(image_size.height,
+		window_size.height = std::clamp(window_size.height,
 			capabilities.minImageExtent.height,
 			capabilities.maxImageExtent.height);
 
@@ -315,7 +316,7 @@ namespace vulkan_display_detail {
 			.setImageColorSpace(swapchain_atributes.format.colorSpace)
 			.setPresentMode(swapchain_atributes.mode)
 			.setMinImageCount(image_count)
-			.setImageExtent(image_size)
+			.setImageExtent(window_size)
 			.setImageArrayLayers(1)
 			.setImageUsage(vk::ImageUsageFlagBits::eColorAttachment)
 			.setImageSharingMode(vk::SharingMode::eExclusive)
@@ -346,23 +347,9 @@ namespace vulkan_display_detail {
 		return RETURN_VAL();
 	}
 
-	RETURN_VAL Vulkan_context::create_viewport_and_scissor() {
-		viewport
-			.setX(0.f)
-			.setY(0.f)
-			.setWidth(static_cast<float>(image_size.width))
-			.setHeight(static_cast<float>(image_size.height))
-			.setMinDepth(0.f)
-			.setMaxDepth(1.f);
-		scissor
-			.setOffset({ 0,0 })
-			.setExtent(image_size);
-		return RETURN_VAL();
-	}
-
 	RETURN_VAL Vulkan_context::init(VkSurfaceKHR surface, uint32_t width, uint32_t height) {
 		this->surface = surface;
-		this->image_size = vk::Extent2D{ width, height };
+		this->window_size = vk::Extent2D{ width, height };
 
 		PASS_RESULT(create_physical_device());
 		PASS_RESULT(get_queue_family_index());
@@ -370,15 +357,14 @@ namespace vulkan_display_detail {
 		queue = device.getQueue(queue_family_index, 0);
 		PASS_RESULT(create_swap_chain());
 		PASS_RESULT(create_swapchain_views());
-		PASS_RESULT(create_viewport_and_scissor());
 	}
 
 	RETURN_VAL Vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
 		vk::FramebufferCreateInfo framebuffer_info;
 		framebuffer_info
 			.setRenderPass(render_pass)
-			.setWidth(image_size.width)
-			.setHeight(image_size.height)
+			.setWidth(window_size.width)
+			.setHeight(window_size.height)
 			.setLayers(1);
 
 		for (size_t i = 0; i < swapchain_images.size(); i++) {
@@ -390,7 +376,9 @@ namespace vulkan_display_detail {
 
 	RETURN_VAL Vulkan_context::recreate_swapchain(vk::Extent2D window_size, vk::RenderPass render_pass) {
 		device.waitIdle();
-		image_size = window_size;
+
+
+		window_size = window_size;
 		destroy_framebuffers();
 		destroy_swapchain_views();
 		vk::SwapchainKHR old_swap_chain = swapchain;
@@ -402,6 +390,7 @@ namespace vulkan_display_detail {
 
 	Vulkan_context::~Vulkan_context() {
 		device.waitIdle();
+
 		destroy_framebuffers();
 		destroy_swapchain_views();
 		device.destroy(swapchain);
