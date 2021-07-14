@@ -101,54 +101,6 @@ RETURN_VAL Vulkan_display::create_texture_sampler()
 	return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::create_descriptor_pool()
-{
-	assert(concurent_paths_count != 0);
-	std::array<vk::DescriptorPoolSize, 1> descriptor_sizes{};
-	descriptor_sizes[0]
-		.setType(vk::DescriptorType::eCombinedImageSampler)
-		.setDescriptorCount(concurent_paths_count);
-	vk::DescriptorPoolCreateInfo pool_info{};
-	pool_info
-		.setPoolSizes(descriptor_sizes)
-		.setMaxSets(concurent_paths_count);
-	CHECKED_ASSIGN(descriptor_pool, device.createDescriptorPool(pool_info));
-	return RETURN_VAL();
-}
-
-RETURN_VAL Vulkan_display::create_description_sets() {
-	assert(descriptor_pool);
-	std::vector<vk::DescriptorSetLayout> layouts(concurent_paths_count, descriptor_set_layout);
-	vk::DescriptorSetAllocateInfo allocate_info;
-	allocate_info
-		.setDescriptorSetCount(concurent_paths_count)
-		.setDescriptorPool(descriptor_pool)
-		.setSetLayouts(layouts);
-
-	CHECKED_ASSIGN(descriptor_sets, device.allocateDescriptorSets(allocate_info));
-
-	vk::DescriptorImageInfo description_image_info;
-	description_image_info
-		.setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-		.setSampler(sampler);
-	
-	std::array<vk::WriteDescriptorSet, 1> descriptor_writes{};
-	descriptor_writes[0]
-		.setDstBinding(1)
-		.setDstArrayElement(0)
-		.setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-		.setDescriptorCount(1)
-		.setPImageInfo(&description_image_info);
-
-	for (unsigned i = 0; i < concurent_paths_count; i++) {
-		description_image_info.setImageView(transfer_images[i].view);
-		descriptor_writes[0].setDstSet(descriptor_sets[i]);
-		device.updateDescriptorSets(descriptor_writes, nullptr);
-	}
-
-	return RETURN_VAL();
-}
-
 
 RETURN_VAL Vulkan_display::create_render_pass(){
 	vk::RenderPassCreateInfo render_pass_info;
@@ -193,15 +145,8 @@ RETURN_VAL Vulkan_display::create_render_pass(){
 	return RETURN_VAL();
 }
 RETURN_VAL Vulkan_display::create_descriptor_set_layout() {
-	std::array< vk::DescriptorSetLayoutBinding, 2> descriptor_set_layout_bindings;
-	descriptor_set_layout_bindings[0]
-		.setBinding(0)
-		.setDescriptorCount(1)
-		.setDescriptorType(vk::DescriptorType::eUniformBuffer)
-		.setStageFlags(vk::ShaderStageFlagBits::eFragment)
-		.setImmutableSamplers(nullptr);
-
-	descriptor_set_layout_bindings[1]
+	vk::DescriptorSetLayoutBinding descriptor_set_layout_bindings;
+	descriptor_set_layout_bindings
 		.setBinding(1)
 		.setDescriptorCount(1)
 		.setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
@@ -317,6 +262,7 @@ RETURN_VAL Vulkan_display::create_concurrent_paths()
 
 RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t height, vk::Format format) {
 	transfer_image_size = vk::Extent2D{ width, height };
+	transfer_image_format = format;
 	vk::ImageCreateInfo image_info;
 	image_info
 		.setImageType(vk::ImageType::e2D)
@@ -356,13 +302,23 @@ RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
 		transfer_images[i].ptr = reinterpret_cast<unsigned char*>(ptr) + i * image_size;
 	}
 	vk::ImageViewCreateInfo view_info = default_image_view_create_info(format);
-
 	for (auto& image : transfer_images) {
 		view_info.setImage(image.image);
 		CHECKED_ASSIGN(image.view, device.createImageView(view_info));
 	}
 
 	transfer_image_byte_size = memory_requirements.size;
+}
+
+void Vulkan_display::destroy_transfer_images() {
+	for (auto& image : transfer_images) {
+		device.destroy(image.view);
+		device.destroy(image.image);
+	}
+	if (transfer_image_memory) {
+		device.unmapMemory(transfer_image_memory);
+		device.freeMemory(transfer_image_memory);
+	}
 }
 
 RETURN_VAL Vulkan_display::create_command_pool() {
@@ -386,6 +342,22 @@ RETURN_VAL Vulkan_display::create_command_buffers() {
 	return RETURN_VAL();
 }
 
+RETURN_VAL Vulkan_display::create_descriptor_pool()
+{
+	assert(concurent_paths_count != 0);
+	std::array<vk::DescriptorPoolSize, 1> descriptor_sizes{};
+	descriptor_sizes[0]
+		.setType(vk::DescriptorType::eCombinedImageSampler)
+		.setDescriptorCount(concurent_paths_count);
+	vk::DescriptorPoolCreateInfo pool_info{};
+	pool_info
+		.setPoolSizes(descriptor_sizes)
+		.setMaxSets(concurent_paths_count);
+	CHECKED_ASSIGN(descriptor_pool, device.createDescriptorPool(pool_info));
+	return RETURN_VAL();
+}
+
+
 RETURN_VAL Vulkan_display::update_render_area() {
 	vk::Extent2D wnd_size = context.window_size;
 	vk::Extent2D img_size = transfer_image_size;
@@ -397,12 +369,12 @@ RETURN_VAL Vulkan_display::update_render_area() {
 	if (wnd_aspect > img_aspect) {
 		render_area.height = wnd_size.height;
 		render_area.width = static_cast<uint32_t>(std::round(wnd_size.height * img_aspect));
-		render_area.x = static_cast<uint32_t>((wnd_size.width - render_area.width) / 2);
+		render_area.x = (wnd_size.width - render_area.width) / 2;
 		render_area.y = 0;
 	}
 	else {
 		render_area.width = wnd_size.width;
-		render_area.height = std::round(wnd_size.width / img_aspect);
+		render_area.height = static_cast<uint32_t>(std::round(wnd_size.width / img_aspect));
 		render_area.x = 0;
 		render_area.y = (wnd_size.height - render_area.height) / 2;
 		
@@ -421,6 +393,39 @@ RETURN_VAL Vulkan_display::update_render_area() {
 	return RETURN_VAL();
 }
 
+RETURN_VAL Vulkan_display::create_description_sets() {
+	assert(descriptor_pool);
+	std::vector<vk::DescriptorSetLayout> layouts(concurent_paths_count, descriptor_set_layout);
+	vk::DescriptorSetAllocateInfo allocate_info;
+	allocate_info
+		.setDescriptorSetCount(concurent_paths_count)
+		.setDescriptorPool(descriptor_pool)
+		.setSetLayouts(layouts);
+
+	CHECKED_ASSIGN(descriptor_sets, device.allocateDescriptorSets(allocate_info));
+
+	vk::DescriptorImageInfo description_image_info;
+	description_image_info
+		.setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+		.setSampler(sampler);
+
+	std::array<vk::WriteDescriptorSet, 1> descriptor_writes{};
+	descriptor_writes[0]
+		.setDstBinding(1)
+		.setDstArrayElement(0)
+		.setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+		.setDescriptorCount(1)
+		.setPImageInfo(&description_image_info);
+
+	for (unsigned i = 0; i < concurent_paths_count; i++) {
+		description_image_info.setImageView(transfer_images[i].view);
+		descriptor_writes[0].setDstSet(descriptor_sets[i]);
+		device.updateDescriptorSets(descriptor_writes, nullptr);
+	}
+
+	return RETURN_VAL();
+}
+
 RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, Window_inteface* window) {
 	// Order of following calls is important
 	this->window = window;
@@ -436,15 +441,15 @@ RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, Window_inteface* window) {
 	PASS_RESULT(create_command_pool());
 	PASS_RESULT(create_command_buffers());
 	PASS_RESULT(create_concurrent_paths());
-	PASS_RESULT(create_transfer_images(width, height));
 	PASS_RESULT(create_descriptor_pool());
-	PASS_RESULT(create_description_sets());
-	PASS_RESULT(update_render_area());
 	return RETURN_VAL();
 }
 
 Vulkan_display::~Vulkan_display(){
 	device.waitIdle();
+	device.destroy(descriptor_pool);
+
+	destroy_transfer_images();
 	device.destroy(command_pool);
 	device.destroy(render_pass);
 	device.destroy(fragment_shader);
@@ -454,14 +459,13 @@ Vulkan_display::~Vulkan_display(){
 		device.destroy(path.image_rendered_semaphore);
 		device.destroy(path.path_available_fence);
 	}
-
-	device.destroy(pipeline_layout);
 	device.destroy(pipeline);
+	device.destroy(pipeline_layout);
+	device.destroy(descriptor_set_layout);
+	device.destroy(sampler);
 }
 
 RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {
-	
-
 	vk::CommandBuffer& cmd_buffer = command_buffers[current_path_id];
 	cmd_buffer.reset();
 
@@ -505,14 +509,31 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 	return RETURN_VAL();
  }
 
-RETURN_VAL Vulkan_display::render(unsigned char* frame, uint64_t size) {
+RETURN_VAL Vulkan_display::render(
+	unsigned char* frame, 
+	uint32_t image_width, 
+	uint32_t image_height, 
+	vk::Format format) 
+{
+	if (vk::Extent2D{ image_width, image_height } != transfer_image_size || format != transfer_image_format) {
+		device.waitIdle();
+		device.resetDescriptorPool(descriptor_pool);
+		destroy_transfer_images();
+		create_transfer_images(image_width, image_height, format);
+		create_description_sets();
+		update_render_area();
+	}
+	
+	assert(uint64_t{ image_height } * image_width * 4 == static_cast<uint64_t>(transfer_image_byte_size));
+
+
 	Path& path = concurent_paths[current_path_id];
 
 	CHECK(device.waitForFences(path.path_available_fence, VK_TRUE, UINT64_MAX),
 		"Waiting for fence failed.");
 	device.resetFences(path.path_available_fence);
 
-	assert(size == static_cast<uint64_t>(transfer_image_byte_size));
+	
 	memcpy(transfer_images[current_path_id].ptr, frame, transfer_image_byte_size);
 	uint32_t image_index;
 	auto acquired = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr, &image_index);
@@ -540,11 +561,22 @@ RETURN_VAL Vulkan_display::render(unsigned char* frame, uint64_t size) {
 		.setSwapchains(context.swapchain)
 		.setWaitSemaphores(path.image_rendered_semaphore);
 	try {
-		CHECK(context.queue.presentKHR(present_info), "Error when presenting image.");
+		CHECK(context.queue.presentKHR(present_info), "Error presenting image.");
 	}
 	catch (vk::OutOfDateKHRError error) {}
 	current_path_id++;
 	current_path_id %= concurent_paths_count;
 	
+	return RETURN_VAL();
+}
+
+
+RETURN_VAL Vulkan_display::resize_window() {
+	auto [width, height] = window->get_window_size();
+	vk::Extent2D new_size{ width, height };
+	if (new_size != context.window_size && new_size.width * new_size.height != 0) {
+		context.recreate_swapchain(vk::Extent2D{ width, height }, render_pass);
+		update_render_area();
+	}
 	return RETURN_VAL();
 }

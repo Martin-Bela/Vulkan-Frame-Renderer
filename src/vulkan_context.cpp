@@ -63,7 +63,7 @@ namespace {
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 		void* pUserData) 
 	{
-		if (strstr(pCallbackData->pMessage, "VUID-vkDestroyDevice-device-00378") != NULL) {
+		if (false && strstr(pCallbackData->pMessage, "VUID-vkDestroyDevice-device-00378") != NULL) {
 			return VK_FALSE;
 		}
 		std::cout << "validation layer: " << pCallbackData->pMessage << '\n' << std::endl;

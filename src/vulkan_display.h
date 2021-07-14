@@ -55,6 +55,8 @@ class Vulkan_display {
 	
 	vk::Extent2D transfer_image_size;
 	vk::DeviceSize transfer_image_byte_size;
+	vk::Format transfer_image_format;
+
 	struct {
 		uint32_t x;
 		uint32_t y;
@@ -74,8 +76,6 @@ private:
 
 	RETURN_VAL create_descriptor_pool();
 
-	RETURN_VAL create_description_sets();
-
 	RETURN_VAL create_render_pass();
 
 	RETURN_VAL create_descriptor_set_layout();
@@ -92,11 +92,16 @@ private:
 
 	RETURN_VAL create_concurrent_paths();
 
-	RETURN_VAL create_transfer_images(uint32_t width, uint32_t height, vk::Format format = vk::Format::eR8G8B8A8Srgb);
+	RETURN_VAL create_transfer_images(uint32_t width, uint32_t height, vk::Format format);
+
+	RETURN_VAL create_description_sets();
+
+	void destroy_transfer_images();
 
 	RETURN_VAL record_graphics_commands(unsigned current_path_id, uint32_t image_index);
 
 	RETURN_VAL update_render_area();
+
 public:
 	Vulkan_display() = default;
 
@@ -112,13 +117,12 @@ public:
 
 	RETURN_VAL init(VkSurfaceKHR surface, Window_inteface* window);
 
-	RETURN_VAL resize_window() {
-		auto [width, height] = window->get_window_size();
-		context.recreate_swapchain(vk::Extent2D{width, height}, render_pass);
-		update_render_area();
-		return RETURN_VAL();
-	}
+	RETURN_VAL render(
+		unsigned char* frame, 
+		uint32_t image_width, 
+		uint32_t image_height, 
+		vk::Format format = vk::Format::eR8G8B8A8Srgb);
 
-	RETURN_VAL render(unsigned char* frame, uint64_t size);
+	RETURN_VAL resize_window();
 
 };
