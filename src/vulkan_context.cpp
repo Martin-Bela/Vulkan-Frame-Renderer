@@ -119,9 +119,6 @@ namespace vulkan_display_detail {
                 vk::ApplicationInfo app_info{};
                 app_info.setApiVersion(VK_API_VERSION_1_0);
 
-                for (auto extension : required_extensions)
-                        std::cout << extension << std::endl;
-
                 vk::InstanceCreateInfo instance_info{};
                 instance_info
                         .setPApplicationInfo(&app_info)
@@ -185,7 +182,7 @@ namespace vulkan_display_detail {
                 assert(queue_family_index != INT32_MAX);
 
                 std::vector<c_str> required_extensions = { "VK_KHR_swapchain" };
-                //VERIFY(check_device_extensions(required_extensions, gpu), "GPU doesn't support required xtensions.");
+                PASS_RESULT(check_device_extensions(required_extensions, gpu));
 
                 float priorities[] = { 1.0 };
                 vk::DeviceQueueCreateInfo queue_info{};

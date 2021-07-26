@@ -102,6 +102,8 @@ private:
 
         RETURN_VAL update_render_area();
 
+        RETURN_VAL acquire_new_image(uint32_t& image, const Path& path);
+
 public:
         Vulkan_display() = default;
         Vulkan_display(const Vulkan_display& other) = delete;

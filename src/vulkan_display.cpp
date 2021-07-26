@@ -539,6 +539,18 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 
         return RETURN_VAL();
 }
+RETURN_VAL Vulkan_display::acquire_new_image(uint32_t& image_index, const Path& path) {
+        while (true) {
+                auto acquired = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr, &image_index);
+                if (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
+                        resize_window();
+                        continue;
+                }
+                
+                CHECK(acquired, "Next swapchain image cannot be acquired."s + vk::to_string(acquired));
+                return RETURN_VAL();
+        }
+}
 
 RETURN_VAL Vulkan_display::render(std::byte* frame,
         uint32_t image_width, uint32_t image_height, vk::Format format)
@@ -563,12 +575,7 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
                 format, transfer_image_row_pitch);
 
         uint32_t image_index;
-        auto acquired = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr, &image_index);
-        while (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
-                resize_window();
-                std::tie(acquired, image_index) = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr);
-        }
-        CHECK(acquired, "Next swapchain image cannot be acquired.");
+        PASS_RESULT(acquire_new_image(image_index, path));
 
         record_graphics_commands(current_path_id, image_index);
 
@@ -587,10 +594,18 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
                 .setImageIndices(image_index)
                 .setSwapchains(context.swapchain)
                 .setWaitSemaphores(path.image_rendered_semaphore);
-        try {
-                CHECK(context.queue.presentKHR(present_info), "Error presenting image.");
+
+        auto present_result = context.queue.presentKHR(&present_info);
+        if (present_result != vk::Result::eSuccess) {
+                using res = vk::Result;
+                switch (present_result) {
+                        // skip recoverable errors, othervise return/throw error 
+                        case res::eErrorOutOfDateKHR: break;
+                        case res::eSuboptimalKHR: break;
+                        default: CHECK(false, "Error presenting image:"s + vk::to_string(present_result));
+                }
         }
-        catch (vk::OutOfDateKHRError& error) { std::cout << error.what() << std::endl; }
+        
         current_path_id++;
         current_path_id %= concurent_paths_count;
 
