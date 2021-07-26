@@ -19,6 +19,9 @@
     <ClInclude Include="src\vulkan_context.h" />
     <ClInclude Include="src\vulkan_display.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include=".editorconfig" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
