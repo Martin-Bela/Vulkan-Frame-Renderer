@@ -1,11 +1,15 @@
+
+#define _DEBUG
 #include "vulkan_context.h"
 #include<iostream>
 
 std::string vulkan_display_error_message = "";
 
+
+
 // vkCreateDebugUtilsMessengerEXT and DestroyDebugUtilsMessengerEXT are extension functions, 
 // so their implementation is not included in static vulkan library and has to be loaded dynamically
-VkResult vkCreateDebugUtilsMessengerEXT(VkInstance instance,
+/*VkResult vkCreateDebugUtilsMessengerEXT(VkInstance instance,
 	const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
 	const VkAllocationCallbacks* pAllocator,
 	VkDebugUtilsMessengerEXT* pMessenger)
@@ -29,7 +33,7 @@ void vkDestroyDebugUtilsMessengerEXT(VkInstance instance,
 	if (implementation != nullptr) {
 		implementation(instance, debugMessenger, pAllocator);
 	}
-}
+}*/
 
 
 
@@ -58,10 +62,10 @@ vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
 
 namespace {
 	VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
-		VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-		VkDebugUtilsMessageTypeFlagsEXT messageType,
+		[[maybe_unused]] VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+		[[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT messageType,
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-		void* pUserData) 
+		[[maybe_unused]] void* pUserData)
 	{
 		if (false && strstr(pCallbackData->pMessage, "VUID-vkDestroyDevice-device-00378") != NULL) {
 			return VK_FALSE;
@@ -155,18 +159,21 @@ namespace vulkan_display_detail {
 		vk::ApplicationInfo app_info{};
 		app_info.setApiVersion(VK_API_VERSION_1_0);
 
+		for (auto extension : required_extensions)
+			std::cout << extension << std::endl;
+
 		vk::InstanceCreateInfo instance_info{};
 		instance_info
 			.setPApplicationInfo(&app_info)
-			.setEnabledLayerCount(static_cast<uint32_t>(validation_layers.size()))
-			.setPpEnabledLayerNames(validation_layers.data())
-			.setEnabledExtensionCount(static_cast<uint32_t>(required_extensions.size()))
-			.setPpEnabledExtensionNames(required_extensions.data());
+			.setPEnabledLayerNames(validation_layers)
+			.setPEnabledExtensionNames(required_extensions);
 		CHECKED_ASSIGN(instance, vk::createInstance(instance_info));
 
 #ifdef _DEBUG
+		dynamic_dispatch_loader=std::make_unique<vk::DispatchLoaderDynamic>(instance, vkGetInstanceProcAddr);
 		PASS_RESULT(init_validation_layers_error_messenger());
 #endif
+
 
 		return RETURN_VAL();
 	}
@@ -181,7 +188,7 @@ namespace vulkan_display_detail {
 			.setMessageType(type::eGeneral | type::ePerformance | type::eValidation)
 			.setPfnUserCallback(debugCallback)
 			.setPUserData(nullptr);
-		CHECKED_ASSIGN(messenger, instance.createDebugUtilsMessengerEXT(messenger_info));
+		CHECKED_ASSIGN(messenger, instance.createDebugUtilsMessengerEXT(messenger_info, nullptr, *dynamic_dispatch_loader));
 		return RETURN_VAL();
 	}
 
@@ -236,8 +243,7 @@ namespace vulkan_display_detail {
 		device_info
 			.setQueueCreateInfoCount(1)
 			.setPQueueCreateInfos(&queue_info)
-			.setEnabledExtensionCount(static_cast<uint32_t>(required_extensions.size()))
-			.setPpEnabledExtensionNames(required_extensions.data());
+			.setPEnabledExtensionNames(required_extensions);
 
 		CHECKED_ASSIGN(device, gpu.createDevice(device_info));
 		return RETURN_VAL();
@@ -329,6 +335,7 @@ namespace vulkan_display_detail {
 	}
 
 
+
 	RETURN_VAL Vulkan_context::create_swapchain_views() {
 		std::vector<vk::Image> images;
 		CHECKED_ASSIGN(images, device.getSwapchainImagesKHR(swapchain));
@@ -396,7 +403,7 @@ namespace vulkan_display_detail {
 		device.destroy(swapchain);
 		instance.destroy(surface);
 		device.destroy();
-		instance.destroy(messenger);
+		instance.destroy(messenger, nullptr, *dynamic_dispatch_loader);
 		instance.destroy();
 	}
 

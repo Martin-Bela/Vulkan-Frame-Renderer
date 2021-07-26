@@ -8,11 +8,11 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
-
-#include<GLFW/glfw3.h>
+#include <cmath>
 
 
 using namespace vulkan_display_detail;
+
 
 
 namespace {
@@ -60,6 +60,44 @@ namespace {
 		}
 		CHECK(false, "No available memory for transfer images found.");
 	}
+
+	RETURN_VAL transport_image(std::byte* dest, std::byte* source, 
+		size_t image_width, size_t image_height, // image width and height should be in pixels
+		vk::Format from_format, size_t row_pitch) 
+	{
+		using f = vk::Format;
+		switch(from_format) {
+			case f::eR8G8B8A8Srgb: {
+				auto row_size = image_width * 4;
+				assert(row_size <= row_pitch);
+				for (size_t row = 0; row < image_height; row++) {
+					memcpy(dest, source, row_size);
+					source += row_size;
+					dest += row_pitch;
+				}
+				break;
+			}
+			case f::eR8G8B8Srgb : {
+				auto row_size = image_width * 4;
+				assert(row_size <= row_pitch);
+				auto row_padding = row_pitch - row_size;
+				for (size_t row = 0; row < image_height; row++) {
+					for (size_t col = 0; col < image_width; col++) {
+						memcpy(dest, source, 3);
+						dest += 4;
+						source += 3;
+					}
+					dest += row_padding;
+				}
+				break;
+			}
+			default:
+				CHECK(false, "Unsupported picture format");
+		}
+		return RETURN_VAL();
+	}
+
+
 } //namespace
 
 vk::ImageMemoryBarrier  Vulkan_display::create_memory_barrier(
@@ -93,6 +131,9 @@ RETURN_VAL Vulkan_display::create_texture_sampler()
 {
 	vk::SamplerCreateInfo sampler_info;
 	sampler_info
+		.setAddressModeU(vk::SamplerAddressMode::eClampToBorder)
+		.setAddressModeV(vk::SamplerAddressMode::eClampToBorder)
+		.setAddressModeW(vk::SamplerAddressMode::eClampToBorder)
 		.setMagFilter(vk::Filter::eLinear)
 		.setMinFilter(vk::Filter::eLinear)
 		.setAnisotropyEnable(false)
@@ -279,6 +320,8 @@ RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
 	transfer_images.resize(concurent_paths_count);
 	for (auto& image : transfer_images) {
 		CHECKED_ASSIGN(image.image, device.createImage(image_info));
+		image.layout = vk::ImageLayout::ePreinitialized;
+		image.access = vk::AccessFlagBits::eHostWrite;
 	}
 
 	vk::MemoryRequirements memory_requirements = device.getImageMemoryRequirements(transfer_images[0].image);
@@ -299,7 +342,7 @@ RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
 	
 	for (size_t i = 0; i < transfer_images.size(); i++) {
 		device.bindImageMemory(transfer_images[i].image, transfer_image_memory, i * image_size);
-		transfer_images[i].ptr = reinterpret_cast<unsigned char*>(ptr) + i * image_size;
+		transfer_images[i].ptr = reinterpret_cast<std::byte*>(ptr) + i * image_size;
 	}
 	vk::ImageViewCreateInfo view_info = default_image_view_create_info(format);
 	for (auto& image : transfer_images) {
@@ -307,7 +350,14 @@ RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
 		CHECKED_ASSIGN(image.view, device.createImageView(view_info));
 	}
 
+	vk::ImageSubresource subresource;
+	subresource
+		.setAspectMask(vk::ImageAspectFlagBits::eColor);
+	auto image_subresource_layout = device.getImageSubresourceLayout(transfer_images[0].image, subresource);
+	
+	transfer_image_row_pitch = image_subresource_layout.rowPitch;
 	transfer_image_byte_size = memory_requirements.size;
+	return RETURN_VAL();
 }
 
 void Vulkan_display::destroy_transfer_images() {
@@ -465,6 +515,7 @@ Vulkan_display::~Vulkan_display(){
 	device.destroy(sampler);
 }
 
+
 RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {
 	vk::CommandBuffer& cmd_buffer = command_buffers[current_path_id];
 	cmd_buffer.reset();
@@ -476,7 +527,7 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 
 	auto render_begin_memory_barrier = create_memory_barrier(transfer_images[current_path_id],
 		vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
-	cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eFragmentShader,
+	cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eFragmentShader,
 		vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_begin_memory_barrier);
 
 	vk::RenderPassBeginInfo render_pass_begin_info;
@@ -499,8 +550,8 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 	cmd_buffer.endRenderPass();
 
 	auto render_end_memory_barrier = create_memory_barrier(transfer_images[current_path_id],
-		vk::ImageLayout::eGeneral, vk::AccessFlagBits::eMemoryWrite);
-	cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eBottomOfPipe,
+		vk::ImageLayout::eGeneral, vk::AccessFlagBits::eHostWrite);
+	cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eHost,
 		vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_end_memory_barrier);
 
 
@@ -510,22 +561,20 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
  }
 
 RETURN_VAL Vulkan_display::render(
-	unsigned char* frame, 
+	std::byte* frame, 
 	uint32_t image_width, 
 	uint32_t image_height, 
 	vk::Format format) 
 {
-	if (vk::Extent2D{ image_width, image_height } != transfer_image_size || format != transfer_image_format) {
+	if (vk::Extent2D{ image_width, image_height } != transfer_image_size) {
+		//todo another formats
 		device.waitIdle();
 		device.resetDescriptorPool(descriptor_pool);
 		destroy_transfer_images();
-		create_transfer_images(image_width, image_height, format);
+		create_transfer_images(image_width, image_height, vk::Format::eR8G8B8A8Srgb);
 		create_description_sets();
 		update_render_area();
 	}
-	
-	assert(uint64_t{ image_height } * image_width * 4 == static_cast<uint64_t>(transfer_image_byte_size));
-
 
 	Path& path = concurent_paths[current_path_id];
 
@@ -533,8 +582,9 @@ RETURN_VAL Vulkan_display::render(
 		"Waiting for fence failed.");
 	device.resetFences(path.path_available_fence);
 
+	transport_image(transfer_images[current_path_id].ptr, frame, image_width, image_height, 
+		format, transfer_image_row_pitch);
 	
-	memcpy(transfer_images[current_path_id].ptr, frame, transfer_image_byte_size);
 	uint32_t image_index;
 	auto acquired = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr, &image_index);
 	while (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
@@ -563,7 +613,7 @@ RETURN_VAL Vulkan_display::render(
 	try {
 		CHECK(context.queue.presentKHR(present_info), "Error presenting image.");
 	}
-	catch (vk::OutOfDateKHRError error) {}
+	catch (vk::OutOfDateKHRError& error) { std::cout << error.what() << std::endl; }
 	current_path_id++;
 	current_path_id %= concurent_paths_count;
 	

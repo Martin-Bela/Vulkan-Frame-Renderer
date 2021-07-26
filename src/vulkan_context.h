@@ -45,14 +45,11 @@ extern std::string vulkan_display_error_message;
 //EXCEPTIONS ARE ENABLED
 #include<exception>
 
-struct  Vulkan_display_exception {
-	std::string message;
-	inline Vulkan_display_exception() = default;
-	inline Vulkan_display_exception(std::string msg) :
-		message{ std::move(msg) } { }
-	inline const char* what() {
-		return message.c_str();
-	}
+
+struct  Vulkan_display_exception : public std::runtime_error {
+	Vulkan_display_exception() = default;
+	Vulkan_display_exception(const std::string& msg) :
+		std::runtime_error{ msg } { }
 };
 
 #define RETURN_VAL void
@@ -72,6 +69,8 @@ namespace vulkan_display_detail {
 	struct Vulkan_context {
 		vk::Instance instance;
 
+		std::unique_ptr<vk::DispatchLoaderDynamic> dynamic_dispatch_loader;
+
 		vk::DebugUtilsMessengerEXT messenger;
 
 		vk::PhysicalDevice gpu;
@@ -86,13 +85,12 @@ namespace vulkan_display_detail {
 			vk::SurfaceCapabilitiesKHR capabilities;
 			vk::SurfaceFormatKHR format;
 			vk::PresentModeKHR mode = vk::PresentModeKHR::eFifo;
-		} swapchain_atributes{};
+		} swapchain_atributes;
 
 		struct Swapchain_image {
 			vk::Image image;
 			vk::ImageView view;
 			vk::Framebuffer framebuffer;
-			//vk::Fence* image_queue_fence;
 		};
 		std::vector<Swapchain_image> swapchain_images;
 
@@ -130,6 +128,11 @@ namespace vulkan_display_detail {
 
 	public:
 		Vulkan_context() = default;
+		Vulkan_context(const Vulkan_context& other) = delete;
+		Vulkan_context& operator=(const Vulkan_context& other) = delete;
+		Vulkan_context(Vulkan_context&& other) = delete;
+		Vulkan_context& operator=(Vulkan_context&& other) = delete;
+
 		~Vulkan_context();
 
 		RETURN_VAL create_instance(std::vector<const char*>& required_extensions);

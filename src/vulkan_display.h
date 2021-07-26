@@ -9,7 +9,7 @@ public:
 
 
 class Vulkan_display {
-	Window_inteface* window;
+	Window_inteface* window = nullptr;
 	vulkan_display_detail::Vulkan_context context;
 	vk::Device device;
 
@@ -22,7 +22,7 @@ class Vulkan_display {
 	vk::RenderPass render_pass;
 	vk::ClearValue clear_color;
 
-	vk::Sampler sampler;
+	vk::Sampler sampler{};
 	vk::DescriptorSetLayout descriptor_set_layout;
 	vk::DescriptorPool descriptor_pool;
 	std::vector<vk::DescriptorSet> descriptor_sets;
@@ -47,13 +47,14 @@ class Vulkan_display {
 	struct Transfer_image {
 		vk::Image image;
 		vk::ImageView view;
-		void* ptr;
-		vk::ImageLayout layout = vk::ImageLayout::ePreinitialized;
-		vk::AccessFlagBits access = vk::AccessFlagBits::eMemoryWrite;
+		std::byte* ptr;
+		vk::ImageLayout layout;
+		vk::AccessFlagBits access;
 	};
 	std::vector<Transfer_image> transfer_images;
 	
 	vk::Extent2D transfer_image_size;
+	size_t transfer_image_row_pitch;
 	vk::DeviceSize transfer_image_byte_size;
 	vk::Format transfer_image_format;
 
@@ -62,7 +63,7 @@ class Vulkan_display {
 		uint32_t y;
 		uint32_t width;
 		uint32_t height;
-	} render_area;
+	} render_area {};
 private:
 	vk::ImageMemoryBarrier create_memory_barrier(
 		Vulkan_display::Transfer_image& image,
@@ -104,6 +105,11 @@ private:
 
 public:
 	Vulkan_display() = default;
+	Vulkan_display(const Vulkan_display& other) = delete;
+	Vulkan_display& operator=(const Vulkan_display& other) = delete;
+	Vulkan_display(Vulkan_display&& other) = delete;
+	Vulkan_display& operator=(Vulkan_display&& other) = delete;
+
 
 	~Vulkan_display();
 
@@ -118,7 +124,7 @@ public:
 	RETURN_VAL init(VkSurfaceKHR surface, Window_inteface* window);
 
 	RETURN_VAL render(
-		unsigned char* frame, 
+		std::byte* frame,
 		uint32_t image_width, 
 		uint32_t image_height, 
 		vk::Format format = vk::Format::eR8G8B8A8Srgb);

@@ -42,6 +42,7 @@ namespace {
 		const c_str* extensions = glfwGetRequiredInstanceExtensions(&count);
 		if (!extensions) {
 			std::cout << "GLFW doesn't support Vulkan." << std::endl;
+			return false;
 		}
 		result = std::vector<c_str>(extensions, extensions + count);
 		return true;
@@ -54,14 +55,14 @@ struct GLFW_vulkan_display : public Window_inteface {
 	GLFWwindow* window = nullptr;
 	Vulkan_display vulkan;
 	
-	unsigned char* image;
+	std::byte* image;
 	int image_width, image_height;
 
 	GLFW_vulkan_display() {
 		
-		image = stbi_load("./resources/picture2.jpg", &image_width, &image_height, nullptr, 4);
+		auto image = stbi_load("./resources/picture.png", &image_width, &image_height, nullptr, 4);
 		assert(image);
-
+		this->image = reinterpret_cast<std::byte*>(image);
 
 		if (!glfwInit()) {
 			throw std::runtime_error{ "GLFW cannot be initialised." };
@@ -110,7 +111,6 @@ struct GLFW_vulkan_display : public Window_inteface {
 	}
 
 
-
 	std::pair<uint32_t, uint32_t> get_window_size() override
 	{
 		int width, height;
@@ -140,18 +140,38 @@ int main() {
 
 
 class SDL_vulkan_display : Window_inteface{
+
 	bool sdl_initialised = false;
 	Vulkan_display vulkan;
 	SDL_Window* window;
 	bool window_should_close = false;
 	
-	unsigned char* image;
+	std::byte* image;
 	int image_width, image_height;
+	
+
+	struct Color {
+		unsigned char r, g, b;
+	};
+	std::vector<Color> image2;
+	uint32_t image2_width = 2021, image2_height = 999;
+
 
 public:
 	SDL_vulkan_display() {
-		image = stbi_load("./resources/picture2.jpg", &image_width, &image_height, nullptr, 4);
+		image2.resize(image2_height * image2_width, { 0, 0, 255 });
+		for (uint32_t x = 0; x < image2_width; x++) {
+			if (x % 128 < 64) {
+				for (uint32_t y = 0; y < image2_height; y++) {
+					image2[x + size_t{ y } *image2_width] = { 255, 0, 0 };
+				}
+			}
+		}
+
+
+		auto image = stbi_load("./resources/picture2.jpg", &image_width, &image_height, nullptr, 4);
 		assert(image);
+		this->image = reinterpret_cast<std::byte*>(image);
 
 		if (SDL_Init(SDL_INIT_EVENTS) != 0) {
 			throw std::runtime_error("SDL cannot be initialised.");
@@ -198,6 +218,7 @@ public:
 	}
 
 	int run() {
+		int count = 0;
 		while (!window_should_close) {
 			SDL_Event event;
 			while (SDL_PollEvent(&event) != 0) {
@@ -219,7 +240,14 @@ public:
 						}
 				}
 			}
-			vulkan.render(image, image_width, image_height);
+			count++;
+			if (count < 150) {
+				vulkan.render(reinterpret_cast<std::byte*>(image2.data()), image2_width, image2_height, 
+					sizeof(Color) == 4 ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb);
+			}
+			else {
+				vulkan.render(image, image_width, image_height);
+			}
 		}
 
 		return 0;
