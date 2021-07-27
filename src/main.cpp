@@ -7,8 +7,11 @@
 
 #include <iostream>
 #include <string>
+#include <chrono>
 
 using namespace std::literals;
+namespace chrono = std::chrono;
+
 namespace {
         using c_str = const char*;
 
@@ -106,11 +109,10 @@ struct GLFW_vulkan_display : public Window_inteface {
                 if (glfw_initialised) glfwTerminate();
         }
 
-        std::pair<uint32_t, uint32_t> get_window_size() override
-        {
+        Window_parameters get_window_parameters() override {
                 int width, height;
                 glfwGetFramebufferSize(window, &width, &height);
-                return {static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
+                return {static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
         }
 
 };
@@ -118,7 +120,7 @@ struct GLFW_vulkan_display : public Window_inteface {
 namespace {
         void window_resize_callback(GLFWwindow* window, int width, int height) {
                 auto display = reinterpret_cast<GLFW_vulkan_display*>(glfwGetWindowUserPointer(window));
-                display->vulkan.resize_window();
+                display->vulkan.window_parameters_changed();
         }
 } // namespace
 
@@ -150,6 +152,7 @@ class SDL_vulkan_display : Window_inteface{
         std::vector<Color> image2;
         uint32_t image2_width = 2021, image2_height = 999;
 
+        chrono::steady_clock::time_point time{ chrono::steady_clock::now() };
 public:
         SDL_vulkan_display() {
                 image2.resize(image2_height * image2_width, { 0, 0, 255 });
@@ -200,15 +203,14 @@ public:
                 if (sdl_initialised) SDL_Quit();
         }
 
-        std::pair<uint32_t, uint32_t> get_window_size() override
-        {
+        Window_parameters get_window_parameters() override {
                 int width, height;
                 SDL_GetWindowSize(window, &width, &height);
-                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
+                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), false };
         }
 
         int run() {
-                int count = 0;
+                int frame_count = 0;
                 while (!window_should_close) {
                         SDL_Event event;
                         while (SDL_PollEvent(&event) != 0) {
@@ -220,7 +222,7 @@ public:
                                                 if (event.window.event == SDL_WINDOWEVENT_EXPOSED
                                                         || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) 
                                                 {
-                                                        vulkan.resize_window();
+                                                        vulkan.window_parameters_changed();
                                                 }
                                                 break;
                                         case SDL_EventType::SDL_KEYDOWN:
@@ -230,14 +232,26 @@ public:
                                                 }
                                 }
                         }
-                        count++;
-                        if (count < 150) {
+                        auto time = chrono::steady_clock::now();
+                        double seconds = chrono::duration_cast<chrono::duration<double>>(time - this->time).count();
+
+                        frame_count++;
+                        if (seconds < 8.0) {
                                 vulkan.render(reinterpret_cast<std::byte*>(image2.data()), image2_width, image2_height, 
                                         sizeof(Color) == 4 ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb);
                         }
                         else {
                                 vulkan.render(image, image_width, image_height);
                         }
+
+                        if (seconds > 6.0) {
+                                double fps = frame_count / seconds;
+                                std::cout << "FPS:" << fps << std::endl;
+                                this->time = time;
+                                frame_count = 0;
+                        }
+
+
                 }
 
                 return 0;

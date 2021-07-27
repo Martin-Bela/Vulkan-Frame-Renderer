@@ -462,8 +462,8 @@ RETURN_VAL Vulkan_display::create_description_sets() {
 RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, Window_inteface* window) {
         // Order of following calls is important
         this->window = window;
-        auto [width, height] = window->get_window_size();
-        PASS_RESULT(context.init(surface, width, height));
+        auto window_parameters = window->get_window_parameters();
+        PASS_RESULT(context.init(surface, window_parameters));
         device = context.device;
         PASS_RESULT(create_shader(vertex_shader, "shaders/vert.spv", device));
         PASS_RESULT(create_shader(fragment_shader, "shaders/frag.spv", device));
@@ -543,7 +543,7 @@ RETURN_VAL Vulkan_display::acquire_new_image(uint32_t& image_index, const Path& 
         while (true) {
                 auto acquired = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr, &image_index);
                 if (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
-                        resize_window();
+                        window_parameters_changed();
                         continue;
                 }
                 
@@ -612,11 +612,10 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::resize_window() {
-        auto [width, height] = window->get_window_size();
-        vk::Extent2D new_size{ width, height };
-        if (new_size != context.window_size && new_size.width * new_size.height != 0) {
-                context.recreate_swapchain(vk::Extent2D{ width, height }, render_pass);
+RETURN_VAL Vulkan_display::window_parameters_changed() {
+        Window_parameters new_parameters = window->get_window_parameters();
+        if (new_parameters != context.get_window_parameters() && new_parameters.width * new_parameters.height != 0) {
+                context.recreate_swapchain(new_parameters, render_pass);
                 update_render_area();
         }
         return RETURN_VAL();
