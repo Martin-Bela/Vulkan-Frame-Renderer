@@ -75,7 +75,7 @@ struct GLFW_vulkan_display : public Window_inteface {
                         throw std::runtime_error{ "Vulkan is not supported by glfw." };
                 }
 
-                vulkan.create_instance(required_extensions);
+                vulkan.create_instance(required_extensions, true);
 
                 glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
                 window = glfwCreateWindow(800, 800, "GLFW/Vulkan Window", NULL, NULL);
@@ -186,7 +186,7 @@ public:
                 SDL_Vulkan_GetInstanceExtensions(window, &extension_count, required_extensions.data());
                 assert(extension_count > 0);
 
-                vulkan.create_instance(required_extensions);
+                vulkan.create_instance(required_extensions, true);
                 auto& instance = vulkan.get_instance();
 
                 VkSurfaceKHR surface;
@@ -206,7 +206,7 @@ public:
         Window_parameters get_window_parameters() override {
                 int width, height;
                 SDL_GetWindowSize(window, &width, &height);
-                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), false };
+                return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
         }
 
         int run() {
