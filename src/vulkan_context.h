@@ -1,5 +1,6 @@
 #pragma once
 
+
 #ifdef NO_EXCEPTIONS
 #define VULKAN_HPP_NO_EXCEPTIONS
 #endif
@@ -81,6 +82,7 @@ namespace vulkan_display_detail {
         using namespace std::literals;
 
         constexpr uint32_t NO_QUEUE_FAMILY_INDEX_FOUND = UINT32_MAX;
+        constexpr uint32_t SWAPCHAIN_IMAGE_OUT_OF_DATE = UINT32_MAX;
 
         struct Vulkan_context {
                 vk::Instance instance;
@@ -162,6 +164,8 @@ namespace vulkan_display_detail {
                 RETURN_VAL init(VkSurfaceKHR surface, Window_parameters parameters, uint32_t gpu_index);
 
                 RETURN_VAL create_framebuffers(vk::RenderPass render_pass);
+
+                RETURN_VAL acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore);
 
                 vk::Framebuffer get_framebuffer(uint32_t framebuffer_id) {
                         return swapchain_images[framebuffer_id].framebuffer;

@@ -425,6 +425,16 @@ namespace vulkan_display_detail {
                 create_framebuffers(render_pass);
         }
 
+        RETURN_VAL Vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore){
+                auto acquired = device.acquireNextImageKHR(swapchain, UINT64_MAX, acquire_semaphore, nullptr, &image_index);
+                if (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
+                        image_index = SWAPCHAIN_IMAGE_OUT_OF_DATE;
+                        return RETURN_VAL();
+                }
+                CHECK(acquired, "Next swapchain image cannot be acquired."s + vk::to_string(acquired));
+                return RETURN_VAL();
+        }
+
         Vulkan_context::~Vulkan_context() {
                 std::cout << "Vulkan context destructor called." << std::endl;
                 if (device) {

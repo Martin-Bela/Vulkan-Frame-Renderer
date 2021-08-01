@@ -67,6 +67,8 @@ class Vulkan_display {
                 uint32_t width;
                 uint32_t height;
         } render_area {};
+
+        bool minimalised = false;
 private:
         vk::ImageMemoryBarrier create_memory_barrier(
                 Vulkan_display::Transfer_image& image,
@@ -105,8 +107,6 @@ private:
 
         RETURN_VAL update_render_area();
 
-        RETURN_VAL acquire_new_image(uint32_t& image, const Path& path);
-
 public:
         Vulkan_display() = default;
         Vulkan_display(const Vulkan_display& other) = delete;
@@ -144,5 +144,10 @@ public:
         /**
          * @brief Hint to vulkan display that some window parameters spicified in struct Window_parameters changed
          */
-        RETURN_VAL window_parameters_changed();
+        RETURN_VAL window_parameters_changed(Window_parameters new_parameters);
+
+        RETURN_VAL window_parameters_changed() {
+                PASS_RESULT(window_parameters_changed(window->get_window_parameters()));
+                return RETURN_VAL();
+        }
 };

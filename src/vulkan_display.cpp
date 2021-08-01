@@ -542,22 +542,16 @@ RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 
         return RETURN_VAL();
 }
-RETURN_VAL Vulkan_display::acquire_new_image(uint32_t& image_index, const Path& path) {
-        while (true) {
-                auto acquired = device.acquireNextImageKHR(context.swapchain, UINT64_MAX, path.image_acquired_semaphore, nullptr, &image_index);
-                if (acquired == vk::Result::eSuboptimalKHR || acquired == vk::Result::eErrorOutOfDateKHR) {
-                        window_parameters_changed();
-                        continue;
-                }
-                
-                CHECK(acquired, "Next swapchain image cannot be acquired."s + vk::to_string(acquired));
-                return RETURN_VAL();
-        }
-}
 
 RETURN_VAL Vulkan_display::render(std::byte* frame,
         uint32_t image_width, uint32_t image_height, vk::Format format)
 {
+        auto window_parameters = window->get_window_parameters();
+        if (window_parameters.height * window_parameters.width == 0) {
+                // window is minimalised
+                return RETURN_VAL();
+        }
+
         if (vk::Extent2D{ image_width, image_height } != transfer_image_size) {
                 //todo another formats
                 device.waitIdle();
@@ -578,8 +572,18 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
                 format, transfer_image_row_pitch);
 
         uint32_t image_index;
-        PASS_RESULT(acquire_new_image(image_index, path));
-
+        PASS_RESULT(context.acquire_next_swapchain_image(image_index, path.image_acquired_semaphore));
+       
+        while (image_index == SWAPCHAIN_IMAGE_OUT_OF_DATE) {
+                window_parameters = window->get_window_parameters();
+                if (window_parameters.width * window_parameters.height == 0) {
+                        // window is minimalised
+                        return RETURN_VAL();
+                }
+                window_parameters_changed(window_parameters);
+                PASS_RESULT(context.acquire_next_swapchain_image(image_index, path.image_acquired_semaphore));
+        }
+                
         record_graphics_commands(current_path_id, image_index);
 
         std::vector<vk::PipelineStageFlags> wait_masks{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
@@ -615,8 +619,7 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::window_parameters_changed() {
-        Window_parameters new_parameters = window->get_window_parameters();
+RETURN_VAL Vulkan_display::window_parameters_changed(Window_parameters new_parameters) {
         if (new_parameters != context.get_window_parameters() && new_parameters.width * new_parameters.height != 0) {
                 context.recreate_swapchain(new_parameters, render_pass);
                 update_render_area();

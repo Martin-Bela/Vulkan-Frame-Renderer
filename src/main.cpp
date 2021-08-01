@@ -205,7 +205,11 @@ public:
 
         Window_parameters get_window_parameters() override {
                 int width, height;
-                SDL_GetWindowSize(window, &width, &height);
+                SDL_Vulkan_GetDrawableSize(window, &width, &height);
+                if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
+                        width = 0;
+                        height = 0;
+                }
                 return { static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
         }
 
