@@ -4,7 +4,9 @@
 
 using namespace vulkan_display_detail;
 
-std::string vulkan_display_error_message = "";
+#ifdef NO_EXCEPTIONS
+std::string vulkan_display_error_message{};
+#endif // NO_EXCEPTIONS
 
 vk::ImageViewCreateInfo default_image_view_create_info(vk::Format format) {
         vk::ImageViewCreateInfo image_view_info{};
@@ -116,7 +118,7 @@ namespace {
                 if (index == NO_QUEUE_FAMILY_INDEX_FOUND) {
                         result = false;
                 }
-                RETURN_VAL();
+                return RETURN_VAL();
         }
 
         RETURN_VAL choose_suitable_GPU(vk::PhysicalDevice& suitable_gpu, const std::vector<vk::PhysicalDevice>& gpus, vk::SurfaceKHR surface) {
@@ -153,9 +155,10 @@ namespace {
                 }
 
                 CHECK(false, "No suitable gpu found.");
+                return RETURN_VAL();
         }
 
-        vk::PhysicalDevice choose_gpu_by_index(std::vector<vk::PhysicalDevice>& gpus, uint32_t gpu_index) {
+         RETURN_VAL choose_gpu_by_index(vk::PhysicalDevice& gpu, std::vector<vk::PhysicalDevice>& gpus, uint32_t gpu_index) {
                 CHECK(gpu_index < gpus.size(), "GPU index is not valid.");
                 std::vector<std::pair<std::string, vk::PhysicalDevice>> gpu_names;
                 gpu_names.reserve(gpus.size());
@@ -167,7 +170,8 @@ namespace {
                 std::transform(gpus.begin(), gpus.end(), std::back_inserter(gpu_names), get_gpu_name);
 
                 std::sort(gpu_names.begin(), gpu_names.end());
-                return gpu_names[gpu_index].second;
+                gpu = gpu_names[gpu_index].second;
+                return RETURN_VAL();
         }
 
         vk::CompositeAlphaFlagBitsKHR get_composite_alpha(vk::CompositeAlphaFlagsKHR capabilities) {
@@ -252,7 +256,7 @@ namespace vulkan_display_detail {
                         PASS_RESULT(choose_suitable_GPU(gpu, gpus, surface));
                 }
                 else {
-                        gpu = choose_gpu_by_index(gpus, gpu_index);
+                        PASS_RESULT(choose_gpu_by_index(gpu, gpus, gpu_index));
                         bool suitable;
                         PASS_RESULT(is_gpu_suitable(suitable, true, gpu, surface));
                 }
@@ -393,6 +397,7 @@ namespace vulkan_display_detail {
                 queue = device.getQueue(queue_family_index, 0);
                 PASS_RESULT(create_swap_chain());
                 PASS_RESULT(create_swapchain_views());
+                return RETURN_VAL();
         }
 
         RETURN_VAL Vulkan_context::create_framebuffers(vk::RenderPass render_pass) {
@@ -414,7 +419,7 @@ namespace vulkan_display_detail {
                 window_size = vk::Extent2D{ parameters.width, parameters.height };
                 vsync = parameters.vsync;
 
-                device.waitIdle();
+                PASS_RESULT(device.waitIdle());
 
                 destroy_framebuffers();
                 destroy_swapchain_views();
@@ -423,6 +428,7 @@ namespace vulkan_display_detail {
                 device.destroySwapchainKHR(old_swap_chain);
                 create_swapchain_views();
                 create_framebuffers(render_pass);
+                return RETURN_VAL();
         }
 
         RETURN_VAL Vulkan_context::acquire_next_swapchain_image(uint32_t& image_index, vk::Semaphore acquire_semaphore){
@@ -438,7 +444,8 @@ namespace vulkan_display_detail {
         Vulkan_context::~Vulkan_context() {
                 std::cout << "Vulkan context destructor called." << std::endl;
                 if (device) {
-                        device.waitIdle();
+                        // static_cast to silence nodiscard warning
+                        static_cast<void>(device.waitIdle());
                         destroy_framebuffers();
                         destroy_swapchain_views();
                         device.destroy(swapchain);
@@ -453,5 +460,4 @@ namespace vulkan_display_detail {
                 }
                 std::cout << "Vulkan context destructor completed." << std::endl;
         }
-
 } //vulkan_display_detail

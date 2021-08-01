@@ -53,6 +53,7 @@ namespace {
                         }
                 }
                 CHECK(false, "No available memory for transfer images found.");
+                return RETURN_VAL();
         }
 
         RETURN_VAL transport_image(std::byte* dest, std::byte* source,
@@ -164,7 +165,7 @@ RETURN_VAL Vulkan_display::create_render_pass() {
                 .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite);
         render_pass_info.setDependencies(subpass_dependency);
 
-        render_pass = device.createRenderPass(render_pass_info);
+        CHECKED_ASSIGN(render_pass, device.createRenderPass(render_pass_info));
 
         vk::ClearColorValue clear_color_value{};
         clear_color_value.setFloat32({ 0.01f, 0.01f, 0.01f, 1.0f });
@@ -187,6 +188,7 @@ RETURN_VAL Vulkan_display::create_descriptor_set_layout() {
                 .setBindings(descriptor_set_layout_bindings);
         CHECKED_ASSIGN(descriptor_set_layout,
                 device.createDescriptorSetLayout(descriptor_set_layout_info));
+        return RETURN_VAL();
 }
 
 RETURN_VAL Vulkan_display::create_graphics_pipeline() {
@@ -320,11 +322,12 @@ RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
                 .setMemoryTypeIndex(memory_type);
         CHECKED_ASSIGN(transfer_image_memory, device.allocateMemory(allocInfo));
 
-        auto ptr = device.mapMemory(transfer_image_memory, 0, image_size * concurent_paths_count);
+        void* ptr; 
+        CHECKED_ASSIGN(ptr, device.mapMemory(transfer_image_memory, 0, image_size * concurent_paths_count));
         CHECK(ptr != nullptr, "Image memory cannot be mapped.");
 
         for (size_t i = 0; i < transfer_images.size(); i++) {
-                device.bindImageMemory(transfer_images[i].image, transfer_image_memory, i * image_size);
+                PASS_RESULT(device.bindImageMemory(transfer_images[i].image, transfer_image_memory, i * image_size));
                 transfer_images[i].ptr = reinterpret_cast<std::byte*>(ptr) + i * image_size;
         }
         vk::ImageViewCreateInfo view_info = default_image_view_create_info(format);
@@ -480,7 +483,8 @@ RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface,
 Vulkan_display::~Vulkan_display() {
         std::cout << "Vulkan_display desctuctor called." << std::endl;
         if (device) {
-                device.waitIdle();
+                // static_cast to disable nodiscard warning
+                static_cast<void>(device.waitIdle());
                 device.destroy(descriptor_pool);
 
                 destroy_transfer_images();
@@ -554,7 +558,7 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
 
         if (vk::Extent2D{ image_width, image_height } != transfer_image_size) {
                 //todo another formats
-                device.waitIdle();
+                PASS_RESULT(device.waitIdle());
                 device.resetDescriptorPool(descriptor_pool);
                 destroy_transfer_images();
                 create_transfer_images(image_width, image_height, vk::Format::eR8G8B8A8Srgb);

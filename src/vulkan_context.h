@@ -3,11 +3,15 @@
 
 #ifdef NO_EXCEPTIONS
 #define VULKAN_HPP_NO_EXCEPTIONS
-#endif
+#endif //NO_EXCEPTIONS
 
 #include <vulkan/vulkan.hpp>
 
 #include <string>
+
+inline vk::Result to_vk_result(void) {
+        return vk::Result::eSuccess;
+}
 
 inline vk::Result to_vk_result(bool b) {
         return b ? vk::Result::eSuccess : vk::Result::eErrorUnknown;
@@ -18,16 +22,22 @@ inline vk::Result to_vk_result(vk::Result res) {
 }
 
 #ifdef NO_EXCEPTIONS //-------------------------------------------------------
-//EXCEPTIONS AREE DISABLED
+//EXCEPTIONS ARE DISABLED
 extern std::string vulkan_display_error_message;
 
 #define RETURN_VAL vk::Result
 
-#define PASS_RESULT(expr) { if (vk::Result res = expr; res != vk::Result::eSuccess) return res; }
+#define PASS_RESULT(expr) {                                              \
+        if (vk::Result res = expr; res != vk::Result::eSuccess) {        \
+                assert(false);                                           \
+                return res;                                              \
+        }                                                                \
+}
 
 #define CHECK(expr, msg) {                                               \
         vk::Result res = to_vk_result(expr);                             \
         if ( res != vk::Result::eSuccess) {                              \
+                assert(false);                                           \
                 vulkan_display_error_message = msg;                      \
                 return res;                                              \
         }                                                                \
@@ -36,6 +46,7 @@ extern std::string vulkan_display_error_message;
 #define CHECKED_ASSIGN(variable, expr) {                                 \
         auto[checked_assign_return_val, checked_assign_value] = expr;    \
         if (checked_assign_return_val != vk::Result::eSuccess) {         \
+                assert(false);                                           \
                 return checked_assign_return_val;                        \
         } else {variable = std::move(checked_assign_value);}             \
 }
@@ -154,11 +165,6 @@ namespace vulkan_display_detail {
 
                 RETURN_VAL create_instance(std::vector<const char*>& required_extensions, bool enable_validation);
 
-                /**
-                 * @brief returns all available grafhics cards
-                 *  first parameter is gpu name,
-                 *  second parameter is true, if gpu is suitable for use by vulkan 
-                 */
                 RETURN_VAL get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus);
                 
                 RETURN_VAL init(VkSurfaceKHR surface, Window_parameters parameters, uint32_t gpu_index);

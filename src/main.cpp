@@ -240,7 +240,7 @@ public:
                         double seconds = chrono::duration_cast<chrono::duration<double>>(time - this->time).count();
 
                         frame_count++;
-                        if (seconds < 8.0) {
+                        if (seconds < 3.0) {
                                 vulkan.render(reinterpret_cast<std::byte*>(image2.data()), image2_width, image2_height, 
                                         sizeof(Color) == 4 ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb);
                         }

@@ -122,13 +122,18 @@ public:
          * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.            
          */
         RETURN_VAL create_instance(std::vector<const char*>& required_extensions, bool enable_validation) {
-                context.create_instance(required_extensions, enable_validation);
+                return context.create_instance(required_extensions, enable_validation);
         }
 
         const vk::Instance& get_instance() {
                 return context.instance;
         }
 
+        /**
+         * @brief returns all available grafhics cards
+         *  first parameter is gpu name,
+         *  second parameter is true only if the gpu is suitable for Vulkan_display
+         */
         RETURN_VAL get_available_gpus(std::vector<std::pair<std::string, bool>>& gpus) {
                 return context.get_available_gpus(gpus);
         }
