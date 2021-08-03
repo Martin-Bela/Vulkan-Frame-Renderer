@@ -49,10 +49,10 @@ namespace {
         }
 }
 
-struct GLFW_vulkan_display : public Window_inteface {
+struct GLFW_vulkan_display : window_changed_callback {
         bool glfw_initialised = false;
         GLFWwindow* window = nullptr;
-        Vulkan_display vulkan;
+        vulkan_display vulkan;
         
         std::byte* image;
         int image_width, image_height;
@@ -108,7 +108,7 @@ struct GLFW_vulkan_display : public Window_inteface {
                 if (glfw_initialised) glfwTerminate();
         }
 
-        Window_parameters get_window_parameters() override {
+        window_parameters get_window_parameters() override {
                 int width, height;
                 glfwGetFramebufferSize(window, &width, &height);
                 return {static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
@@ -134,10 +134,10 @@ int main() {
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 
-class SDL_vulkan_display : Window_inteface{
+class SDL_vulkan_display : window_changed_callback{
 
         bool sdl_initialised = false;
-        Vulkan_display vulkan;
+        vulkan_display vulkan;
         SDL_Window* window;
         bool window_should_close = false;
         
@@ -145,10 +145,10 @@ class SDL_vulkan_display : Window_inteface{
         int image_width, image_height;
         
 
-        struct Color {
+        struct color {
                 unsigned char r, g, b;
         };
-        std::vector<Color> image2;
+        std::vector<color> image2;
         uint32_t image2_width = 2021, image2_height = 999;
 
         chrono::steady_clock::time_point time{ chrono::steady_clock::now() };
@@ -202,7 +202,7 @@ public:
                 if (sdl_initialised) SDL_Quit();
         }
 
-        Window_parameters get_window_parameters() override {
+        window_parameters get_window_parameters() override {
                 int width, height;
                 SDL_Vulkan_GetDrawableSize(window, &width, &height);
                 if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
@@ -241,7 +241,7 @@ public:
                         frame_count++;
                         if (seconds < 3.0) {
                                 vulkan.render(reinterpret_cast<std::byte*>(image2.data()), image2_width, image2_height, 
-                                        sizeof(Color) == 4 ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb);
+                                        sizeof(color) == 4 ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb);
                         }
                         else {
                                 vulkan.render(image, image_width, image_height);
