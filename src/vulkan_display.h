@@ -21,7 +21,7 @@ class Vulkan_display {
 
         vk::ShaderModule vertex_shader;
         vk::ShaderModule fragment_shader;
-        
+
         vk::RenderPass render_pass;
         vk::ClearValue clear_color;
 
@@ -29,7 +29,7 @@ class Vulkan_display {
         vk::DescriptorSetLayout descriptor_set_layout;
         vk::DescriptorPool descriptor_pool;
         std::vector<vk::DescriptorSet> descriptor_sets;
-        
+
         vk::PipelineLayout pipeline_layout;
         vk::Pipeline pipeline;
 
@@ -55,7 +55,7 @@ class Vulkan_display {
                 vk::AccessFlagBits access;
         };
         std::vector<Transfer_image> transfer_images;
-        
+
         vk::Extent2D transfer_image_size;
         size_t transfer_image_row_pitch;
         vk::DeviceSize transfer_image_byte_size;
@@ -66,7 +66,7 @@ class Vulkan_display {
                 uint32_t y;
                 uint32_t width;
                 uint32_t height;
-        } render_area {};
+        } render_area{};
 
         bool minimalised = false;
 private:
@@ -115,11 +115,11 @@ public:
         Vulkan_display& operator=(Vulkan_display&& other) = delete;
 
         ~Vulkan_display();
-        
+
         /**
          * @param required_extensions   Vulkan instance extensions requested by aplication,
          *                              usually needed for creating vulkan surface
-         * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.            
+         * @param enable_validation     Enable vulkan validation layers, they should be disabled in release build.
          */
         RETURN_VAL create_instance(std::vector<const char*>& required_extensions, bool enable_validation) {
                 return context.create_instance(required_extensions, enable_validation);
@@ -142,8 +142,8 @@ public:
 
         RETURN_VAL render(
                 std::byte* frame,
-                uint32_t image_width, 
-                uint32_t image_height, 
+                uint32_t image_width,
+                uint32_t image_height,
                 vk::Format format = vk::Format::eR8G8B8A8Srgb);
 
         /**

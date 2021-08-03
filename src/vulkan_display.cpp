@@ -13,88 +13,89 @@
 using namespace vulkan_display_detail;
 
 namespace {
-        vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
-                vk::DeviceSize remainder = size % allignment;
-                if (remainder == 0)
-                        return size;
-                return size + allignment - remainder;
+
+vk::DeviceSize add_padding(vk::DeviceSize size, vk::DeviceSize allignment) {
+        vk::DeviceSize remainder = size % allignment;
+        if (remainder == 0)
+                return size;
+        return size + allignment - remainder;
+}
+
+RETURN_VAL create_shader(vk::ShaderModule& shader,
+        const std::filesystem::path& file_path,
+        const vk::Device& device)
+{
+        std::ifstream file(file_path, std::ios::binary);
+        CHECK(file.is_open(), "Failed to open file:"s + file_path.string());
+        auto size = std::filesystem::file_size(file_path);
+        assert(size % 4 == 0);
+        std::vector<std::uint32_t> shader_code(size / 4);
+        file.read(reinterpret_cast<char*>(shader_code.data()), size);
+        CHECK(file.good(), "Error reading from file:"s + file_path.string());
+
+        vk::ShaderModuleCreateInfo shader_info;
+        shader_info.setCode(shader_code);
+        CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
+        return RETURN_VAL();
+}
+
+RETURN_VAL get_memory_type(
+        uint32_t& memory_type, uint32_t memory_type_bits,
+        vk::MemoryPropertyFlags requested_properties, vk::PhysicalDevice gpu)
+{
+        auto supported_properties = gpu.getMemoryProperties();
+        for (uint32_t i = 0; i < supported_properties.memoryTypeCount; i++) {
+                auto& mem_type = supported_properties.memoryTypes[i];
+                if (((mem_type.propertyFlags & requested_properties) == requested_properties) &&
+                        ((1 << i) & memory_type_bits))
+                {
+                        memory_type = i;
+                        return RETURN_VAL();
+                }
         }
+        CHECK(false, "No available memory for transfer images found.");
+        return RETURN_VAL();
+}
 
-        RETURN_VAL create_shader(vk::ShaderModule& shader,
-                const std::filesystem::path& file_path,
-                const vk::Device& device)
-        {
-                std::ifstream file(file_path, std::ios::binary);
-                CHECK(file.is_open(), "Failed to open file:"s + file_path.string());
-                auto size = std::filesystem::file_size(file_path);
-                assert(size % 4 == 0);
-                std::vector<std::uint32_t> shader_code(size / 4);
-                file.read(reinterpret_cast<char*>(shader_code.data()), size);
-                CHECK(file.good(), "Error reading from file:"s + file_path.string());
-
-                vk::ShaderModuleCreateInfo shader_info;
-                shader_info.setCode(shader_code);
-                CHECKED_ASSIGN(shader, device.createShaderModule(shader_info));
-                return RETURN_VAL();
+RETURN_VAL transport_image(std::byte* dest, std::byte* source,
+        size_t image_width, size_t image_height, // image width and height should be in pixels
+        vk::Format from_format, size_t row_pitch)
+{
+        using f = vk::Format;
+        switch (from_format) {
+        case f::eR8G8B8A8Srgb: {
+                auto row_size = image_width * 4;
+                assert(row_size <= row_pitch);
+                for (size_t row = 0; row < image_height; row++) {
+                        memcpy(dest, source, row_size);
+                        source += row_size;
+                        dest += row_pitch;
+                }
+                break;
         }
-
-        RETURN_VAL get_memory_type(
-                uint32_t& memory_type, uint32_t memory_type_bits,
-                vk::MemoryPropertyFlags requested_properties, vk::PhysicalDevice gpu)
-        {
-                auto supported_properties = gpu.getMemoryProperties();
-                for (uint32_t i = 0; i < supported_properties.memoryTypeCount; i++) {
-                        auto& mem_type = supported_properties.memoryTypes[i];
-                        if (((mem_type.propertyFlags & requested_properties) == requested_properties) &&
-                                ((1 << i) & memory_type_bits))
-                        {
-                                memory_type = i;
-                                return RETURN_VAL();
+        case f::eR8G8B8Srgb: {
+                auto row_size = image_width * 4;
+                assert(row_size <= row_pitch);
+                auto row_padding = row_pitch - row_size;
+                for (size_t row = 0; row < image_height; row++) {
+                        for (size_t col = 0; col < image_width; col++) {
+                                memcpy(dest, source, 3);
+                                dest += 4;
+                                source += 3;
                         }
+                        dest += row_padding;
                 }
-                CHECK(false, "No available memory for transfer images found.");
-                return RETURN_VAL();
+                break;
         }
-
-        RETURN_VAL transport_image(std::byte* dest, std::byte* source,
-                size_t image_width, size_t image_height, // image width and height should be in pixels
-                vk::Format from_format, size_t row_pitch)
-        {
-                using f = vk::Format;
-                switch (from_format) {
-                case f::eR8G8B8A8Srgb: {
-                        auto row_size = image_width * 4;
-                        assert(row_size <= row_pitch);
-                        for (size_t row = 0; row < image_height; row++) {
-                                memcpy(dest, source, row_size);
-                                source += row_size;
-                                dest += row_pitch;
-                        }
-                        break;
-                }
-                case f::eR8G8B8Srgb: {
-                        auto row_size = image_width * 4;
-                        assert(row_size <= row_pitch);
-                        auto row_padding = row_pitch - row_size;
-                        for (size_t row = 0; row < image_height; row++) {
-                                for (size_t col = 0; col < image_width; col++) {
-                                        memcpy(dest, source, 3);
-                                        dest += 4;
-                                        source += 3;
-                                }
-                                dest += row_padding;
-                        }
-                        break;
-                }
-                default:
-                        CHECK(false, "Unsupported picture format");
-                }
-                return RETURN_VAL();
+        default:
+                CHECK(false, "Unsupported picture format");
         }
+        return RETURN_VAL();
+}
 
-} //namespace
+} //namespace -------------------------------------------------------------
 
-vk::ImageMemoryBarrier  Vulkan_display::create_memory_barrier( Vulkan_display::Transfer_image& image,
+vk::ImageMemoryBarrier  Vulkan_display::create_memory_barrier(Vulkan_display::Transfer_image& image,
         vk::ImageLayout new_layout, vk::AccessFlagBits new_access_mask,
         uint32_t src_queue_family_index, uint32_t dst_queue_family_index)
 {
@@ -322,7 +323,7 @@ RETURN_VAL Vulkan_display::create_transfer_images(uint32_t width, uint32_t heigh
                 .setMemoryTypeIndex(memory_type);
         CHECKED_ASSIGN(transfer_image_memory, device.allocateMemory(allocInfo));
 
-        void* ptr; 
+        void* ptr;
         CHECKED_ASSIGN(ptr, device.mapMemory(transfer_image_memory, 0, image_size * concurent_paths_count));
         CHECK(ptr != nullptr, "Image memory cannot be mapped.");
 
@@ -404,8 +405,7 @@ RETURN_VAL Vulkan_display::update_render_area() {
                 render_area.width = static_cast<uint32_t>(std::round(wnd_size.height * img_aspect));
                 render_area.x = (wnd_size.width - render_area.width) / 2;
                 render_area.y = 0;
-        }
-        else {
+        } else {
                 render_area.width = wnd_size.width;
                 render_area.height = static_cast<uint32_t>(std::round(wnd_size.width / img_aspect));
                 render_area.x = 0;
@@ -459,7 +459,7 @@ RETURN_VAL Vulkan_display::create_description_sets() {
         return RETURN_VAL();
 }
 
-RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface, 
+RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface,
         Window_inteface* window, uint32_t gpu_index) {
         // Order of following calls is important
         assert(surface);
@@ -481,7 +481,6 @@ RETURN_VAL Vulkan_display::init(VkSurfaceKHR surface,
 }
 
 Vulkan_display::~Vulkan_display() {
-        std::cout << "Vulkan_display desctuctor called." << std::endl;
         if (device) {
                 // static_cast to disable nodiscard warning
                 static_cast<void>(device.waitIdle());
@@ -502,7 +501,6 @@ Vulkan_display::~Vulkan_display() {
                 device.destroy(descriptor_set_layout);
                 device.destroy(sampler);
         }
-        std::cout << "Vulkan_display desctuction completed." << std::endl;
 }
 
 RETURN_VAL Vulkan_display::record_graphics_commands(unsigned current_path_id, uint32_t image_index) {
@@ -577,7 +575,7 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
 
         uint32_t image_index;
         PASS_RESULT(context.acquire_next_swapchain_image(image_index, path.image_acquired_semaphore));
-       
+
         while (image_index == SWAPCHAIN_IMAGE_OUT_OF_DATE) {
                 window_parameters = window->get_window_parameters();
                 if (window_parameters.width * window_parameters.height == 0) {
@@ -587,7 +585,7 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
                 window_parameters_changed(window_parameters);
                 PASS_RESULT(context.acquire_next_swapchain_image(image_index, path.image_acquired_semaphore));
         }
-                
+
         record_graphics_commands(current_path_id, image_index);
 
         std::vector<vk::PipelineStageFlags> wait_masks{ vk::PipelineStageFlagBits::eColorAttachmentOutput };
@@ -611,12 +609,12 @@ RETURN_VAL Vulkan_display::render(std::byte* frame,
                 using res = vk::Result;
                 switch (present_result) {
                         // skip recoverable errors, othervise return/throw error 
-                        case res::eErrorOutOfDateKHR: break;
-                        case res::eSuboptimalKHR: break;
-                        default: CHECK(false, "Error presenting image:"s + vk::to_string(present_result));
+                case res::eErrorOutOfDateKHR: break;
+                case res::eSuboptimalKHR: break;
+                default: CHECK(false, "Error presenting image:"s + vk::to_string(present_result));
                 }
         }
-        
+
         current_path_id++;
         current_path_id %= concurent_paths_count;
 

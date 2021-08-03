@@ -1,7 +1,6 @@
 //#define NO_EXCEPTIONS
 
 #include "vulkan_display.h" // Vulkan.h must be before GLFW
-
 #include <GLFW/glfw3.h>
 #include <stb_image.h>
 
@@ -155,7 +154,7 @@ class SDL_vulkan_display : Window_inteface{
         chrono::steady_clock::time_point time{ chrono::steady_clock::now() };
 public:
         SDL_vulkan_display() {
-                image2.resize(image2_height * image2_width, { 0, 0, 255 });
+                image2.resize(size_t{ image2_height } *image2_width, { 0, 0, 255 });
                 for (uint32_t x = 0; x < image2_width; x++) {
                         if (x % 128 < 64) {
                                 for (uint32_t y = 0; y < image2_height; y++) {
