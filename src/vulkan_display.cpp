@@ -57,7 +57,7 @@ RETURN_VAL get_memory_type(
         return RETURN_VAL();
 }
 
-RETURN_VAL transport_image(std::byte* dest, std::byte* source,
+RETURN_VAL transport_image(std::byte* destination, std::byte* source,
         size_t image_width, size_t image_height, // image width and height should be in pixels
         vk::Format from_format, size_t row_pitch)
 {
@@ -67,23 +67,29 @@ RETURN_VAL transport_image(std::byte* dest, std::byte* source,
                 auto row_size = image_width * 4;
                 assert(row_size <= row_pitch);
                 for (size_t row = 0; row < image_height; row++) {
-                        memcpy(dest, source, row_size);
+                        memcpy(destination, source, row_size);
                         source += row_size;
-                        dest += row_pitch;
+                        destination += row_pitch;
                 }
                 break;
         }
         case f::eR8G8B8Srgb: {
-                auto row_size = image_width * 4;
-                assert(row_size <= row_pitch);
-                auto row_padding = row_pitch - row_size;
                 for (size_t row = 0; row < image_height; row++) {
+                        //lines are copied from back to the front, 
+                        //so it can be done in place
+
+                        // move to the end of lines
+                        auto dest = destination + image_width * 4;
+                        auto src = source + image_width * 3;
                         for (size_t col = 0; col < image_width; col++) {
-                                memcpy(dest, source, 3);
-                                dest += 4;
-                                source += 3;
+                                //move sequentially from back to the beginning of the line
+                                dest -= 4;
+                                src -= 3;
+                                memcpy(dest, src, 3);
                         }
-                        dest += row_padding;
+                        assert(destination == dest && source == src);
+                        destination += row_pitch;
+                        source += image_width * 3; //todo tightly packed for now
                 }
                 break;
         }
