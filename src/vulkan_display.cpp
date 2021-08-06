@@ -1,14 +1,14 @@
 #include "vulkan_display.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <memory>
 #include <vector>
-#include <iostream>
-#include <fstream>
-#include <filesystem>
-#include <cmath>
 
 using namespace vulkan_display_detail;
 
@@ -95,16 +95,87 @@ RETURN_VAL transport_image(std::byte* dest, std::byte* source,
 
 } //namespace -------------------------------------------------------------
 
-vk::ImageMemoryBarrier  vulkan_display::create_memory_barrier(vulkan_display::transfer_image& image,
+RETURN_VAL transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
+        vk::Extent2D size, vk::Format format) 
+{
+        destroy(device, false);
+
+        this->size = size;
+        this->format = format;
+        this->layout = vk::ImageLayout::ePreinitialized;
+        this->access = vk::AccessFlagBits::eHostWrite;
+
+        vk::ImageCreateInfo image_info;
+        image_info
+                .setImageType(vk::ImageType::e2D)
+                .setExtent(vk::Extent3D{ size, 1 })
+                .setMipLevels(1)
+                .setArrayLayers(1)
+                .setFormat(format)
+                .setTiling(vk::ImageTiling::eLinear)
+                .setInitialLayout(vk::ImageLayout::ePreinitialized)
+                .setUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst)
+                .setSharingMode(vk::SharingMode::eExclusive)
+                .setSamples(vk::SampleCountFlagBits::e1);
+        CHECKED_ASSIGN(image, device.createImage(image_info));
+
+        vk::MemoryRequirements memory_requirements = device.getImageMemoryRequirements(image);
+        vk::DeviceSize byte_size = add_padding(memory_requirements.size, memory_requirements.alignment);
+
+        using mem_bits = vk::MemoryPropertyFlagBits;
+        uint32_t memory_type;
+        PASS_RESULT(get_memory_type(memory_type, memory_requirements.memoryTypeBits,
+                mem_bits::eHostVisible | mem_bits::eHostCoherent, gpu));
+
+        vk::MemoryAllocateInfo allocInfo{ byte_size , memory_type };
+        CHECKED_ASSIGN(memory, device.allocateMemory(allocInfo));
+
+        PASS_RESULT(device.bindImageMemory(image, memory, 0));
+
+        void* void_ptr;
+        CHECKED_ASSIGN(void_ptr, device.mapMemory(memory, 0, memory_requirements.size));
+        CHECK(void_ptr != nullptr, "Image memory cannot be mapped.");
+        ptr = reinterpret_cast<std::byte*>(void_ptr);
+
+        vk::ImageViewCreateInfo view_info = default_image_view_create_info(format);
+        view_info.setImage(image);
+        CHECKED_ASSIGN(view, device.createImageView(view_info));
+
+        vk::ImageSubresource subresource{ vk::ImageAspectFlagBits::eColor, 0, 0 };
+        row_pitch = device.getImageSubresourceLayout(image, subresource).rowPitch;
+
+        if (!is_available_fence) {
+                vk::FenceCreateInfo fence_info{ vk::FenceCreateFlagBits::eSignaled };
+                CHECKED_ASSIGN(is_available_fence, device.createFence(fence_info));
+        }
+}
+
+RETURN_VAL transfer_image::destroy(vk::Device device, bool destroy_fence) {
+        if (is_available_fence) {
+                auto result = device.waitForFences(is_available_fence, true, UINT64_MAX);
+                CHECK(result, "Waiting for transfer image fence failed.");
+                
+                device.destroy(view);
+                device.destroy(image);
+
+                device.unmapMemory(memory);
+                device.freeMemory(memory);
+                if (destroy_fence) {
+                        device.destroy(is_available_fence);
+                }
+        }
+}
+
+vk::ImageMemoryBarrier  transfer_image::create_memory_barrier(
         vk::ImageLayout new_layout, vk::AccessFlagBits new_access_mask,
         uint32_t src_queue_family_index, uint32_t dst_queue_family_index)
 {
         vk::ImageMemoryBarrier memory_barrier{};
         memory_barrier
-                .setImage(image.image)
-                .setOldLayout(image.layout)
+                .setImage(image)
+                .setOldLayout(layout)
                 .setNewLayout(new_layout)
-                .setSrcAccessMask(image.access)
+                .setSrcAccessMask(access)
                 .setDstAccessMask(new_access_mask)
                 .setSrcQueueFamilyIndex(src_queue_family_index)
                 .setDstQueueFamilyIndex(dst_queue_family_index);
@@ -113,8 +184,8 @@ vk::ImageMemoryBarrier  vulkan_display::create_memory_barrier(vulkan_display::tr
                 .setLayerCount(1)
                 .setLevelCount(1);
 
-        image.layout = new_layout;
-        image.access = new_access_mask;
+        layout = new_layout;
+        access = new_access_mask;
         return memory_barrier;
 }
 
@@ -187,6 +258,7 @@ RETURN_VAL vulkan_display::create_descriptor_set_layout() {
         vk::DescriptorSetLayoutCreateInfo descriptor_set_layout_info{};
         descriptor_set_layout_info
                 .setBindings(descriptor_set_layout_bindings);
+
         CHECKED_ASSIGN(descriptor_set_layout,
                 device.createDescriptorSetLayout(descriptor_set_layout_info));
         return RETURN_VAL();
@@ -273,89 +345,14 @@ RETURN_VAL vulkan_display::create_concurrent_paths()
 {
         vk::SemaphoreCreateInfo semaphore_info;
 
-        vk::FenceCreateInfo fence_info{};
-        fence_info.setFlags(vk::FenceCreateFlagBits::eSignaled);
-
         concurent_paths.resize(concurent_paths_count);
 
         for (auto& path : concurent_paths) {
                 CHECKED_ASSIGN(path.image_acquired_semaphore, device.createSemaphore(semaphore_info));
                 CHECKED_ASSIGN(path.image_rendered_semaphore, device.createSemaphore(semaphore_info));
-                CHECKED_ASSIGN(path.path_available_fence, device.createFence(fence_info));
         }
 
         return RETURN_VAL();
-}
-
-RETURN_VAL vulkan_display::create_transfer_images(uint32_t width, uint32_t height, vk::Format format) {
-        transfer_image_size = vk::Extent2D{ width, height };
-        transfer_image_format = format;
-        vk::ImageCreateInfo image_info;
-        image_info
-                .setImageType(vk::ImageType::e2D)
-                .setExtent(vk::Extent3D{ width, height, 1 })
-                .setMipLevels(1)
-                .setArrayLayers(1)
-                .setFormat(format)
-                .setTiling(vk::ImageTiling::eLinear)
-                .setInitialLayout(vk::ImageLayout::ePreinitialized)
-                .setUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst)
-                .setSharingMode(vk::SharingMode::eExclusive)
-                .setSamples(vk::SampleCountFlagBits::e1);
-
-        transfer_images.resize(concurent_paths_count);
-        for (auto& image : transfer_images) {
-                CHECKED_ASSIGN(image.image, device.createImage(image_info));
-                image.layout = vk::ImageLayout::ePreinitialized;
-                image.access = vk::AccessFlagBits::eHostWrite;
-        }
-
-        vk::MemoryRequirements memory_requirements = device.getImageMemoryRequirements(transfer_images[0].image);
-        using mem_bits = vk::MemoryPropertyFlagBits;
-        uint32_t memory_type;
-        PASS_RESULT(get_memory_type(memory_type, memory_requirements.memoryTypeBits,
-                mem_bits::eHostVisible | mem_bits::eHostCached, context.gpu));
-
-        vk::DeviceSize image_size = add_padding(memory_requirements.size, memory_requirements.alignment);
-        vk::MemoryAllocateInfo allocInfo{};
-        allocInfo
-                .setAllocationSize(image_size * concurent_paths_count)
-                .setMemoryTypeIndex(memory_type);
-        CHECKED_ASSIGN(transfer_image_memory, device.allocateMemory(allocInfo));
-
-        void* ptr;
-        CHECKED_ASSIGN(ptr, device.mapMemory(transfer_image_memory, 0, image_size * concurent_paths_count));
-        CHECK(ptr != nullptr, "Image memory cannot be mapped.");
-
-        for (size_t i = 0; i < transfer_images.size(); i++) {
-                PASS_RESULT(device.bindImageMemory(transfer_images[i].image, transfer_image_memory, i * image_size));
-                transfer_images[i].ptr = reinterpret_cast<std::byte*>(ptr) + i * image_size;
-        }
-        vk::ImageViewCreateInfo view_info = default_image_view_create_info(format);
-        for (auto& image : transfer_images) {
-                view_info.setImage(image.image);
-                CHECKED_ASSIGN(image.view, device.createImageView(view_info));
-        }
-
-        vk::ImageSubresource subresource;
-        subresource
-                .setAspectMask(vk::ImageAspectFlagBits::eColor);
-        auto image_subresource_layout = device.getImageSubresourceLayout(transfer_images[0].image, subresource);
-
-        transfer_image_row_pitch = image_subresource_layout.rowPitch;
-        transfer_image_byte_size = memory_requirements.size;
-        return RETURN_VAL();
-}
-
-void vulkan_display::destroy_transfer_images() {
-        for (auto& image : transfer_images) {
-                device.destroy(image.view);
-                device.destroy(image.image);
-        }
-        if (transfer_image_memory) {
-                device.unmapMemory(transfer_image_memory);
-                device.freeMemory(transfer_image_memory);
-        }
 }
 
 RETURN_VAL vulkan_display::create_command_pool() {
@@ -395,10 +392,9 @@ RETURN_VAL vulkan_display::create_descriptor_pool()
 
 RETURN_VAL vulkan_display::update_render_area() {
         vk::Extent2D wnd_size = context.window_size;
-        vk::Extent2D img_size = transfer_image_size;
 
         double wnd_aspect = static_cast<double>(wnd_size.width) / wnd_size.height;
-        double img_aspect = static_cast<double>(img_size.width) / img_size.height;
+        double img_aspect = static_cast<double>(current_image_size.width) / current_image_size.height;
 
         if (wnd_aspect > img_aspect) {
                 render_area.height = wnd_size.height;
@@ -431,7 +427,6 @@ RETURN_VAL vulkan_display::create_description_sets() {
         std::vector<vk::DescriptorSetLayout> layouts(concurent_paths_count, descriptor_set_layout);
         vk::DescriptorSetAllocateInfo allocate_info;
         allocate_info
-                .setDescriptorSetCount(concurent_paths_count)
                 .setDescriptorPool(descriptor_pool)
                 .setSetLayouts(layouts);
 
@@ -477,6 +472,7 @@ RETURN_VAL vulkan_display::init(VkSurfaceKHR surface,
         PASS_RESULT(create_command_buffers());
         PASS_RESULT(create_concurrent_paths());
         PASS_RESULT(create_descriptor_pool());
+        transfer_images.resize(concurent_paths_count);
         return RETURN_VAL();
 }
 
@@ -486,7 +482,10 @@ vulkan_display::~vulkan_display() {
                 static_cast<void>(device.waitIdle());
                 device.destroy(descriptor_pool);
 
-                destroy_transfer_images();
+                for (auto& image : transfer_images) {
+                        image.destroy(device);
+                }
+
                 device.destroy(command_pool);
                 device.destroy(render_pass);
                 device.destroy(fragment_shader);
@@ -494,7 +493,6 @@ vulkan_display::~vulkan_display() {
                 for (auto& path : concurent_paths) {
                         device.destroy(path.image_acquired_semaphore);
                         device.destroy(path.image_rendered_semaphore);
-                        device.destroy(path.path_available_fence);
                 }
                 device.destroy(pipeline);
                 device.destroy(pipeline_layout);
@@ -511,7 +509,7 @@ RETURN_VAL vulkan_display::record_graphics_commands(unsigned current_path_id, ui
         begin_info.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
         PASS_RESULT(cmd_buffer.begin(begin_info));
 
-        auto render_begin_memory_barrier = create_memory_barrier(transfer_images[current_path_id],
+        auto render_begin_memory_barrier = transfer_images[current_path_id].create_memory_barrier(
                 vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
         cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eFragmentShader,
                 vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_begin_memory_barrier);
@@ -535,7 +533,7 @@ RETURN_VAL vulkan_display::record_graphics_commands(unsigned current_path_id, ui
 
         cmd_buffer.endRenderPass();
 
-        auto render_end_memory_barrier = create_memory_barrier(transfer_images[current_path_id],
+        auto render_end_memory_barrier = transfer_images[current_path_id].create_memory_barrier(
                 vk::ImageLayout::eGeneral, vk::AccessFlagBits::eHostWrite);
         cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eHost,
                 vk::DependencyFlagBits::eByRegion, nullptr, nullptr, render_end_memory_barrier);
@@ -549,36 +547,33 @@ RETURN_VAL vulkan_display::render(std::byte* frame,
         uint32_t image_width, uint32_t image_height, vk::Format format)
 {
         auto window_parameters = window->get_window_parameters();
-        if (window_parameters.height * window_parameters.width == 0) {
+        if (window_parameters.width * window_parameters.height == 0) {
                 // window is minimalised
                 return RETURN_VAL();
         }
 
-        if (vk::Extent2D{ image_width, image_height } != transfer_image_size) {
+        path& path = concurent_paths[current_path_id];
+        transfer_image* transfer_image = &transfer_images[current_path_id];
+
+        if (vk::Extent2D{ image_width, image_height } != transfer_image->size) {
                 //todo another formats
                 PASS_RESULT(device.waitIdle());
                 device.resetDescriptorPool(descriptor_pool);
-                destroy_transfer_images();
-                create_transfer_images(image_width, image_height, vk::Format::eR8G8B8A8Srgb);
+                current_image_size = vk::Extent2D{ image_width, image_height };
+                for (auto& image : transfer_images) {
+                        image.create(device, context.gpu, current_image_size, vk::Format::eR8G8B8A8Srgb);
+                }
+                transfer_image = &transfer_images[current_path_id];
                 create_description_sets();
                 update_render_area();
         }
-
-        path& path = concurent_paths[current_path_id];
-
-        CHECK(device.waitForFences(path.path_available_fence, VK_TRUE, UINT64_MAX),
+        
+        CHECK(device.waitForFences(transfer_image->is_available_fence, VK_TRUE, UINT64_MAX),
                 "Waiting for fence failed.");
-        device.resetFences(path.path_available_fence);
+        device.resetFences(transfer_image->is_available_fence);
 
-        transport_image(transfer_images[current_path_id].ptr, frame, image_width, image_height,
-                format, transfer_image_row_pitch);
-
-        vk::MappedMemoryRange mapped_memory_range{};
-        mapped_memory_range
-                .setMemory(transfer_image_memory)
-                .setOffset(transfer_images[current_path_id].ptr - transfer_images[0].ptr)
-                .setSize(transfer_image_byte_size);
-        device.flushMappedMemoryRanges(mapped_memory_range);
+        transport_image(transfer_image->ptr, frame, image_width, image_height,
+                format, transfer_image->row_pitch);
         
         uint32_t image_index;
         PASS_RESULT(context.acquire_next_swapchain_image(image_index, path.image_acquired_semaphore));
@@ -603,7 +598,7 @@ RETURN_VAL vulkan_display::render(std::byte* frame,
                 .setWaitSemaphores(path.image_acquired_semaphore)
                 .setSignalSemaphores(path.image_rendered_semaphore);
 
-        PASS_RESULT(context.queue.submit(submit_info, path.path_available_fence));
+        PASS_RESULT(context.queue.submit(submit_info, transfer_image->is_available_fence));
 
         vk::PresentInfoKHR present_info{};
         present_info

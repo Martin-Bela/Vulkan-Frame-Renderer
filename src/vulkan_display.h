@@ -2,6 +2,38 @@
 
 #include "vulkan_context.h"
 #include <utility>
+#include <mutex>
+
+
+class transfer_image {
+        vk::DeviceMemory memory;
+        vk::Image image;
+        vk::ImageLayout layout;
+        vk::AccessFlagBits access;
+public:
+        vk::ImageView view;
+        std::byte* ptr;
+
+        vk::Format format;
+        vk::Extent2D size;
+        size_t row_pitch;
+
+        vk::Fence is_available_fence;
+
+        RETURN_VAL create(vk::Device device, vk::PhysicalDevice gpu, vk::Extent2D size, vk::Format format);
+        
+        RETURN_VAL destroy(vk::Device device, bool destroy_fence = true);
+        
+        vk::ImageMemoryBarrier create_memory_barrier( 
+                vk::ImageLayout new_layout, 
+                vk::AccessFlagBits new_access_mask,
+                uint32_t src_queue_family_index = VK_QUEUE_FAMILY_IGNORED,
+                uint32_t dst_queue_family_index = VK_QUEUE_FAMILY_IGNORED);
+public:
+        transfer_image() = default;
+};
+
+
 
 
 class window_changed_callback {
@@ -15,6 +47,7 @@ class vulkan_display {
         window_changed_callback* window = nullptr;
         vulkan_display_detail::vulkan_context context;
         vk::Device device;
+        std::mutex device_lock;
 
         vk::Viewport viewport;
         vk::Rect2D scissor;
@@ -41,25 +74,11 @@ class vulkan_display {
         struct path {
                 vk::Semaphore image_acquired_semaphore;
                 vk::Semaphore image_rendered_semaphore;
-                vk::Fence path_available_fence;
         };
         std::vector<path> concurent_paths;
 
-        vk::DeviceMemory transfer_image_memory;
-
-        struct transfer_image {
-                vk::Image image;
-                vk::ImageView view;
-                std::byte* ptr;
-                vk::ImageLayout layout;
-                vk::AccessFlagBits access;
-        };
         std::vector<transfer_image> transfer_images;
-
-        vk::Extent2D transfer_image_size;
-        size_t transfer_image_row_pitch;
-        vk::DeviceSize transfer_image_byte_size;
-        vk::Format transfer_image_format;
+        vk::Extent2D current_image_size;
 
         struct {
                 uint32_t x;
@@ -69,13 +88,7 @@ class vulkan_display {
         } render_area{};
 
         bool minimalised = false;
-private:
-        vk::ImageMemoryBarrier create_memory_barrier(
-                vulkan_display::transfer_image& image,
-                vk::ImageLayout new_layout,
-                vk::AccessFlagBits new_access_mask,
-                uint32_t src_queue_family_index = VK_QUEUE_FAMILY_IGNORED,
-                uint32_t dst_queue_family_index = VK_QUEUE_FAMILY_IGNORED);
+private:     
 
         RETURN_VAL create_texture_sampler();
 
@@ -97,11 +110,9 @@ private:
 
         RETURN_VAL create_concurrent_paths();
 
-        RETURN_VAL create_transfer_images(uint32_t width, uint32_t height, vk::Format format);
+        RETURN_VAL create_transfer_image(uint32_t width, uint32_t height, vk::Format format);
 
         RETURN_VAL create_description_sets();
-
-        void destroy_transfer_images();
 
         RETURN_VAL record_graphics_commands(unsigned current_path_id, uint32_t image_index);
 
