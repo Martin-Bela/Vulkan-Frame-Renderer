@@ -110,6 +110,7 @@ RETURN_VAL transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
         this->format = format;
         this->layout = vk::ImageLayout::ePreinitialized;
         this->access = vk::AccessFlagBits::eHostWrite;
+        this->update_desciptor_set = true;
 
         vk::ImageCreateInfo image_info;
         image_info
@@ -156,22 +157,6 @@ RETURN_VAL transfer_image::create(vk::Device device, vk::PhysicalDevice gpu,
         }
 }
 
-RETURN_VAL transfer_image::destroy(vk::Device device, bool destroy_fence) {
-        if (is_available_fence) {
-                auto result = device.waitForFences(is_available_fence, true, UINT64_MAX);
-                CHECK(result, "Waiting for transfer image fence failed.");
-                
-                device.destroy(view);
-                device.destroy(image);
-
-                device.unmapMemory(memory);
-                device.freeMemory(memory);
-                if (destroy_fence) {
-                        device.destroy(is_available_fence);
-                }
-        }
-}
-
 vk::ImageMemoryBarrier  transfer_image::create_memory_barrier(
         vk::ImageLayout new_layout, vk::AccessFlagBits new_access_mask,
         uint32_t src_queue_family_index, uint32_t dst_queue_family_index)
@@ -194,6 +179,48 @@ vk::ImageMemoryBarrier  transfer_image::create_memory_barrier(
         access = new_access_mask;
         return memory_barrier;
 }
+
+RETURN_VAL transfer_image::update_description_set(vk::Device device, vk::DescriptorSet descriptor_set, vk::Sampler sampler) {
+        if (update_desciptor_set || sampler != this->sampler) {
+                update_desciptor_set = false;
+                this->sampler = sampler;
+                vk::DescriptorImageInfo description_image_info;
+                description_image_info
+                        .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                        .setSampler(sampler)
+                        .setImageView(view);
+
+                vk::WriteDescriptorSet descriptor_writes{};
+                descriptor_writes
+                        .setDstBinding(1)
+                        .setDstArrayElement(0)
+                        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                        .setPImageInfo(&description_image_info)
+                        .setDescriptorCount(1)
+                        .setDstSet(descriptor_set);
+
+                device.updateDescriptorSets(descriptor_writes, nullptr);
+                return RETURN_VAL();
+        }
+}
+
+RETURN_VAL transfer_image::destroy(vk::Device device, bool destroy_fence) {
+        if (is_available_fence) {
+                auto result = device.waitForFences(is_available_fence, true, UINT64_MAX);
+                CHECK(result, "Waiting for transfer image fence failed.");
+
+                device.destroy(view);
+                device.destroy(image);
+
+                device.unmapMemory(memory);
+                device.freeMemory(memory);
+                if (destroy_fence) {
+                        device.destroy(is_available_fence);
+                }
+        }
+}
+
+//vulkan_display methods---------------------------------------------------
 
 RETURN_VAL vulkan_display::create_texture_sampler() {
         vk::SamplerCreateInfo sampler_info;
@@ -381,11 +408,11 @@ RETURN_VAL vulkan_display::create_command_buffers() {
         return RETURN_VAL();
 }
 
-RETURN_VAL vulkan_display::create_descriptor_pool()
-{
+RETURN_VAL vulkan_display::allocate_description_sets() {
         assert(concurent_paths_count != 0);
-        std::array<vk::DescriptorPoolSize, 1> descriptor_sizes{};
-        descriptor_sizes[0]
+        assert(descriptor_set_layout);
+        vk::DescriptorPoolSize descriptor_sizes{};
+        descriptor_sizes
                 .setType(vk::DescriptorType::eCombinedImageSampler)
                 .setDescriptorCount(concurent_paths_count);
         vk::DescriptorPoolCreateInfo pool_info{};
@@ -393,6 +420,16 @@ RETURN_VAL vulkan_display::create_descriptor_pool()
                 .setPoolSizes(descriptor_sizes)
                 .setMaxSets(concurent_paths_count);
         CHECKED_ASSIGN(descriptor_pool, device.createDescriptorPool(pool_info));
+        
+        std::vector<vk::DescriptorSetLayout> layouts(concurent_paths_count, descriptor_set_layout);
+        
+        vk::DescriptorSetAllocateInfo allocate_info;
+        allocate_info
+                .setDescriptorPool(descriptor_pool)
+                .setSetLayouts(layouts);
+
+        CHECKED_ASSIGN(descriptor_sets, device.allocateDescriptorSets(allocate_info));
+        
         return RETURN_VAL();
 }
 
@@ -428,38 +465,6 @@ RETURN_VAL vulkan_display::update_render_area() {
         return RETURN_VAL();
 }
 
-RETURN_VAL vulkan_display::create_description_sets() {
-        assert(descriptor_pool);
-        std::vector<vk::DescriptorSetLayout> layouts(concurent_paths_count, descriptor_set_layout);
-        vk::DescriptorSetAllocateInfo allocate_info;
-        allocate_info
-                .setDescriptorPool(descriptor_pool)
-                .setSetLayouts(layouts);
-
-        CHECKED_ASSIGN(descriptor_sets, device.allocateDescriptorSets(allocate_info));
-
-        vk::DescriptorImageInfo description_image_info;
-        description_image_info
-                .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-                .setSampler(sampler);
-
-        std::array<vk::WriteDescriptorSet, 1> descriptor_writes{};
-        descriptor_writes[0]
-                .setDstBinding(1)
-                .setDstArrayElement(0)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setDescriptorCount(1)
-                .setPImageInfo(&description_image_info);
-
-        for (unsigned i = 0; i < concurent_paths_count; i++) {
-                description_image_info.setImageView(transfer_images[i].view);
-                descriptor_writes[0].setDstSet(descriptor_sets[i]);
-                device.updateDescriptorSets(descriptor_writes, nullptr);
-        }
-
-        return RETURN_VAL();
-}
-
 RETURN_VAL vulkan_display::init(VkSurfaceKHR surface,
         window_changed_callback* window, uint32_t gpu_index) {
         // Order of following calls is important
@@ -477,7 +482,7 @@ RETURN_VAL vulkan_display::init(VkSurfaceKHR surface,
         PASS_RESULT(create_command_pool());
         PASS_RESULT(create_command_buffers());
         PASS_RESULT(create_concurrent_paths());
-        PASS_RESULT(create_descriptor_pool());
+        PASS_RESULT(allocate_description_sets();)
         transfer_images.resize(concurent_paths_count);
         return RETURN_VAL();
 }
@@ -564,16 +569,14 @@ RETURN_VAL vulkan_display::render(std::byte* frame,
         if (vk::Extent2D{ image_width, image_height } != transfer_image->size) {
                 //todo another formats
                 PASS_RESULT(device.waitIdle());
-                device.resetDescriptorPool(descriptor_pool);
                 current_image_size = vk::Extent2D{ image_width, image_height };
                 for (auto& image : transfer_images) {
                         image.create(device, context.gpu, current_image_size, vk::Format::eR8G8B8A8Srgb);
                 }
                 transfer_image = &transfer_images[current_path_id];
-                create_description_sets();
                 update_render_area();
         }
-        
+        transfer_image->update_description_set(device, descriptor_sets[current_path_id], sampler);
         CHECK(device.waitForFences(transfer_image->is_available_fence, VK_TRUE, UINT64_MAX),
                 "Waiting for fence failed.");
         device.resetFences(transfer_image->is_available_fence);

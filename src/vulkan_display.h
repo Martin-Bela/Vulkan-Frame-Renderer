@@ -20,15 +20,21 @@ public:
 
         vk::Fence is_available_fence;
 
+        bool update_desciptor_set;
+        vk::Sampler sampler;
+
         RETURN_VAL create(vk::Device device, vk::PhysicalDevice gpu, vk::Extent2D size, vk::Format format);
-        
-        RETURN_VAL destroy(vk::Device device, bool destroy_fence = true);
         
         vk::ImageMemoryBarrier create_memory_barrier( 
                 vk::ImageLayout new_layout, 
                 vk::AccessFlagBits new_access_mask,
                 uint32_t src_queue_family_index = VK_QUEUE_FAMILY_IGNORED,
                 uint32_t dst_queue_family_index = VK_QUEUE_FAMILY_IGNORED);
+
+        /// update_description_sets should be called everytime before recording the command buffer
+        RETURN_VAL update_description_set(vk::Device device, vk::DescriptorSet descriptor_set, vk::Sampler sampler);
+
+        RETURN_VAL destroy(vk::Device device, bool destroy_fence = true);
 public:
         transfer_image() = default;
 };
@@ -92,8 +98,6 @@ private:
 
         RETURN_VAL create_texture_sampler();
 
-        RETURN_VAL create_descriptor_pool();
-
         RETURN_VAL create_render_pass();
 
         RETURN_VAL create_descriptor_set_layout();
@@ -112,7 +116,7 @@ private:
 
         RETURN_VAL create_transfer_image(uint32_t width, uint32_t height, vk::Format format);
 
-        RETURN_VAL create_description_sets();
+        RETURN_VAL allocate_description_sets();
 
         RETURN_VAL record_graphics_commands(unsigned current_path_id, uint32_t image_index);
 
