@@ -14,11 +14,13 @@
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\vulkan_context.cpp" />
     <ClCompile Include="src\vulkan_display.cpp" />
+    <ClCompile Include="src\vulkan_transfer_image.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\concurent_queue.h" />
     <ClInclude Include="src\vulkan_context.h" />
     <ClInclude Include="src\vulkan_display.h" />
+    <ClInclude Include="src\vulkan_transfer_image.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />

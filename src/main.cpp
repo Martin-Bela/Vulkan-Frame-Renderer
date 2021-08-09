@@ -57,11 +57,13 @@ struct GLFW_vulkan_display : window_changed_callback {
         vulkan_display vulkan;
         
         std::byte* image;
-        int image_width, image_height;
+        uint32_t image_width, image_height;
 
         GLFW_vulkan_display() {
-                
-                auto image = stbi_load("./resources/picture.png", &image_width, &image_height, nullptr, 4);
+                int width, height;
+                auto image = stbi_load("./resources/picture.png", &width, &height, nullptr, 4);
+                image_width = static_cast<uint32_t>(width);
+                image_height = static_cast<uint32_t>(height);
                 assert(image);
                 this->image = reinterpret_cast<std::byte*>(image);
 
@@ -93,13 +95,14 @@ struct GLFW_vulkan_display : window_changed_callback {
                         throw std::runtime_error{ "Vulkan surface cannot be created." };
                 }
 
-                vulkan.init(raw_surface, this);
+                vulkan.init(raw_surface, 3, this);
         }
 
         int run() {
                 while (!glfwWindowShouldClose(window)) {
                         glfwPollEvents();
-                        vulkan.render(image, image_width, image_height);
+                        vulkan.copy_and_queue_image(image, { image_width, image_height, vk::Format::eR8G8B8A8Srgb });
+                        vulkan.display_queued_image();
                 }
 
                 return 0;
@@ -144,11 +147,11 @@ class SDL_vulkan_display : window_changed_callback{
         bool window_should_close = false;
         
         std::byte* image;
-        int image_width, image_height;
+        uint32_t image_width, image_height;
         
 
         struct color {
-                unsigned char r, g, b;
+                unsigned char r, g, b, a;
         };
         std::vector<color> image2;
         uint32_t image2_width = 2021, image2_height = 999;
@@ -164,8 +167,11 @@ public:
                                 }
                         }
                 }
-
-                auto image = stbi_load("./resources/picture2.jpg", &image_width, &image_height, nullptr, 4);
+                int width, height;
+                auto image = stbi_load("./resources/picture2.jpg", &width, &height, nullptr, 4);
+                image_width = static_cast<uint32_t>(width);
+                image_height = static_cast<uint32_t>(height);
+                
                 assert(image);
                 this->image = reinterpret_cast<std::byte*>(image);
 
@@ -195,7 +201,7 @@ public:
                         throw std::runtime_error("SDL cannot create surface.");
                 }
 
-                vulkan.init(surface, this);
+                vulkan.init(surface, 3, this);
                 
         }
 
@@ -242,12 +248,14 @@ public:
 
                         frame_count++;
                         if (seconds < 3.0) {
-                                vulkan.render(reinterpret_cast<std::byte*>(image2.data()), image2_width, image2_height, 
-                                        sizeof(color) == 4 ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb);
+                                vulkan.copy_and_queue_image(reinterpret_cast<std::byte*>(image2.data()), { image2_width, image2_height,
+                                        sizeof(color) == 4 ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb });
                         }
                         else {
-                                vulkan.render(image, image_width, image_height);
+                                vulkan.copy_and_queue_image(image, { image_width, image_height });
                         }
+
+                        vulkan.display_queued_image();
 
                         if (seconds > 6.0) {
                                 double fps = frame_count / seconds;
