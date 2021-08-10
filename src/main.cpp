@@ -12,6 +12,7 @@
 
 using namespace std::literals;
 namespace chrono = std::chrono;
+namespace vkd = vulkan_display;
 
 namespace {
         using c_str = const char*;
@@ -51,10 +52,10 @@ namespace {
         }
 }
 
-struct GLFW_vulkan_display : window_changed_callback {
+struct GLFW_vulkan_display : vkd::window_changed_callback {
         bool glfw_initialised = false;
         GLFWwindow* window = nullptr;
-        vulkan_display vulkan;
+        vkd::vulkan_display vulkan;
         
         std::byte* image;
         uint32_t image_width, image_height;
@@ -113,7 +114,7 @@ struct GLFW_vulkan_display : window_changed_callback {
                 if (glfw_initialised) glfwTerminate();
         }
 
-        window_parameters get_window_parameters() override {
+        vkd::window_parameters get_window_parameters() override {
                 int width, height;
                 glfwGetFramebufferSize(window, &width, &height);
                 return {static_cast<uint32_t>(width), static_cast<uint32_t>(height), true };
@@ -139,10 +140,10 @@ int main() {
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 
-class SDL_vulkan_display : window_changed_callback{
+class SDL_vulkan_display : vkd::window_changed_callback{
 
         bool sdl_initialised = false;
-        vulkan_display vulkan;
+        vkd::vulkan_display vulkan;
         SDL_Window* window;
         bool window_should_close = false;
         
@@ -210,7 +211,7 @@ public:
                 if (sdl_initialised) SDL_Quit();
         }
 
-        window_parameters get_window_parameters() override {
+        vkd::window_parameters get_window_parameters() override {
                 int width, height;
                 SDL_Vulkan_GetDrawableSize(window, &width, &height);
                 if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
