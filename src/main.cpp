@@ -6,15 +6,39 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#include <atomic>
 #include <iostream>
 #include <string>
 #include <chrono>
+#include <thread>
 
 using namespace std::literals;
 namespace chrono = std::chrono;
 namespace vkd = vulkan_display;
 
 namespace {
+        void rgb_to_rgba(vkd::image& image) {
+                auto [image_width, image_height] = image.get_size();
+                std::byte* row_ptr = image.get_memory_ptr();
+                for (size_t row = 0; row < image_height; row++) {
+                        //lines are copied from back to the front, 
+                        //so it can be done in place
+
+                        // move to the end of lines
+                        std::byte* dest = row_ptr + image_width * 4;
+                        std::byte* src = row_ptr + image_width * 3;
+                        for (size_t col = 0; col < image_width; col++) {
+                                //move sequentially from back to the beginning of the line
+                                dest -= 4;
+                                src -= 3;
+                                memcpy(dest, src, 3);
+                        }
+                        assert(row_ptr == dest && row_ptr == src);
+                        row_ptr += image.get_row_pitch();
+                }
+        }
+
+
         using c_str = const char*;
 
         template<typename fun>
@@ -158,13 +182,16 @@ class SDL_vulkan_display : vkd::window_changed_callback{
         uint32_t image2_width = 2021, image2_height = 999;
 
         chrono::steady_clock::time_point time{ chrono::steady_clock::now() };
+
+        std::thread thread;
+        std::atomic<bool> should_exit = false;
 public:
         SDL_vulkan_display() {
-                image2.resize(size_t{ image2_height } *image2_width, { 0, 0, 255 });
+                image2.resize(size_t{ image2_height } * image2_width, { 0, 255, 255 });
                 for (uint32_t x = 0; x < image2_width; x++) {
-                        if (x % 128 < 64) {
+                        if (x % 2048 < 1024) {
                                 for (uint32_t y = 0; y < image2_height; y++) {
-                                        image2[x + size_t{ y } *image2_width] = { 255, 0, 0 };
+                                        image2[x + size_t{ y } *image2_width] = { 0, 255, 0 };
                                 }
                         }
                 }
@@ -202,8 +229,13 @@ public:
                         throw std::runtime_error("SDL cannot create surface.");
                 }
 
-                vulkan.init(surface, 3, this);
+                vulkan.init(surface, 5, this);
                 
+                thread = std::thread{ [&]() {
+                        while (!should_exit) {
+                                vulkan.display_queued_image();
+                        }
+                } };
         }
 
         ~SDL_vulkan_display() {
@@ -249,14 +281,24 @@ public:
 
                         frame_count++;
                         if (seconds < 3.0) {
-                                vulkan.copy_and_queue_image(reinterpret_cast<std::byte*>(image2.data()), { image2_width, image2_height,
-                                        sizeof(color) == 4 ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8Srgb });
+                                vkd::image vkd_image;
+                                vulkan.acquire_image(vkd_image,{ image2_width, image2_height});
+                                for (unsigned i = 0; i < image2_height; i++) {
+                                        memcpy(vkd_image.get_memory_ptr() + i * vkd_image.get_row_pitch(), 
+                                                image2.data() + i * image2_width, 
+                                                sizeof(color) * image2_width);
+                                }
+                                bool rgb = (sizeof(color) == 3);
+                                vkd_image.set_process_function([rgb](vkd::image image) {
+                                        if (rgb) {
+                                                rgb_to_rgba(image);
+                                        }
+                                });
+                                vulkan.queue_image(vkd_image);
                         }
                         else {
                                 vulkan.copy_and_queue_image(image, { image_width, image_height });
                         }
-
-                        vulkan.display_queued_image();
 
                         if (seconds > 6.0) {
                                 double fps = frame_count / seconds;
@@ -267,7 +309,8 @@ public:
 
 
                 }
-
+                should_exit = true;
+                thread.join();
                 return 0;
         }
 };

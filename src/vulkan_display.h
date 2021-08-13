@@ -64,13 +64,13 @@ class vulkan_display {
 
         using transfer_image = vulkan_display_detail::transfer_image;
         unsigned transfer_image_count;
-        std::vector<transfer_image> transfer_images;
+        std::vector<transfer_image> transfer_images{};
         image_description current_image_description;
 
-        concurrent_queue<transfer_image*> available_img_queue;
-        concurrent_queue<transfer_image*> filled_img_queue;
+        concurrent_queue<transfer_image*> available_img_queue{};
+        concurrent_queue<image> filled_img_queue{};
 
-
+        unsigned filled_img_max_count;
         bool minimalised = false;
 private:
 
@@ -132,11 +132,15 @@ public:
 
         RETURN_TYPE acquire_image(image& image, image_description description);
 
-        RETURN_TYPE queue_image(image image) {
-                filled_img_queue.push(&image.get_transfer_image());
-        }
+        RETURN_TYPE queue_image(image img);
 
         RETURN_TYPE copy_and_queue_image(std::byte* frame, image_description description);
+
+        RETURN_TYPE discard_image(image image) {
+                auto ptr = image.get_transfer_image();
+                assert(ptr);
+                available_img_queue.push(ptr);
+        }
 
         RETURN_TYPE display_queued_image();
 
