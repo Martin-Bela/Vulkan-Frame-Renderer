@@ -1,5 +1,3 @@
-//#define NO_EXCEPTIONS
-
 #include "vulkan_display.h" // Vulkan.h must be before GLFW
 #include <GLFW/glfw3.h>
 
