@@ -229,9 +229,20 @@ public:
 
                 vulkan.init(surface, 5, this);
                 
-                thread = std::thread{ [&]() {
+                thread = std::thread{ [this]() {
+                        int frame_count = 0;
+                        auto time = chrono::steady_clock::now();
                         while (!should_exit) {
+                                frame_count++;
                                 vulkan.display_queued_image();
+                                auto now = chrono::steady_clock::now();
+                                double seconds = chrono::duration_cast<chrono::duration<double>>(now - time).count();
+                                if (seconds > 6.0) {
+                                        double fps = frame_count / seconds;
+                                        std::cout << "FPS:" << fps << std::endl;
+                                        time = now;
+                                        frame_count = 0;
+                                }
                         }
                 } };
         }
@@ -252,7 +263,6 @@ public:
         }
 
         int run() {
-                int frame_count = 0;
                 while (!window_should_close) {
                         SDL_Event event;
                         while (SDL_PollEvent(&event) != 0) {
@@ -277,7 +287,6 @@ public:
                         auto time = chrono::steady_clock::now();
                         double seconds = chrono::duration_cast<chrono::duration<double>>(time - this->time).count();
 
-                        frame_count++;
                         if (seconds < 3.0) {
                                 vkd::image vkd_image;
                                 vulkan.acquire_image(vkd_image,{ image2_width, image2_height});
@@ -297,15 +306,9 @@ public:
                         else {
                                 vulkan.copy_and_queue_image(image, { image_width, image_height });
                         }
-
                         if (seconds > 6.0) {
-                                double fps = frame_count / seconds;
-                                std::cout << "FPS:" << fps << std::endl;
                                 this->time = time;
-                                frame_count = 0;
                         }
-
-
                 }
                 should_exit = true;
                 thread.join();
